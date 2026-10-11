@@ -108,7 +108,11 @@ fn main() {
     } = &mut cli.command
     {
         if !*confirm {
-            match confirm_uninstall(*purge_settings) {
+            let pending_purge = match maintenance::uninstall_purge_pending() {
+                Ok(purge) => purge,
+                Err(error) => std::process::exit(failure(&error)),
+            };
+            match confirm_uninstall(*purge_settings || pending_purge) {
                 Ok(Some(purge)) => {
                     *purge_settings = purge;
                     *confirm = true;
@@ -218,18 +222,8 @@ fn run(action: &Action) -> io::Result<i32> {
             }
             maintenance::configure(&settings)?;
         },
-        Action::Uninstall {
-            purge_settings,
-            confirm,
-        } => {
-            let mut purge_settings = *purge_settings;
-            if !*confirm {
-                let Some(purge) = confirm_uninstall(purge_settings)? else {
-                    return Ok(5);
-                };
-                purge_settings = purge;
-            }
-            match maintenance::uninstall(purge_settings)? {
+        Action::Uninstall { purge_settings, .. } => {
+            match maintenance::uninstall(*purge_settings)? {
                 UninstallOutcome::RemovalPending => {
                     show(&translator().text("maintenance-removal-pending"), false);
                     return Ok(4);

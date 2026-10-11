@@ -13,14 +13,14 @@ use super::{
 pub fn uninstall(purge_settings: bool) -> io::Result<UninstallOutcome> {
     let (root, _guard, lease) = prepare_root()?;
     let mut tx = resume_uninstall(&root)?;
-    if tx.schema_version != 1 || !request::valid_id(&tx.id) {
-        return Err(invalid("invalid uninstall transaction"));
-    }
-    validate_ownership(&tx.before)?;
-    validate_ownership(&tx.after)?;
+    validate_uninstall_transaction(&tx)?;
     if tx.before.files.is_empty() && tx.before_install.is_some() {
         return Err(invalid("cannot uninstall without ownership metadata"));
     }
+    record_purge_settings(&mut tx, purge_settings);
+    // Purging can partly succeed before final cleanup needs a retry. Preserve
+    // that choice before any removal, since the deleted preferences cannot be restored.
+    tx.save(&root)?;
     tx.state(&root, InstallationState::Removing)?;
     tx.write(&root, SETTINGS_KEY, "MenusEnabled", Some(Value::number(0)))?;
     // Package removal must complete before any external-location payload is deleted.
@@ -97,34 +97,69 @@ pub fn uninstall(purge_settings: bool) -> io::Result<UninstallOutcome> {
         tx.after.files.remove(&name);
         tx.save(&root)?;
     }
-    finalize_removal(&root, &mut tx, purge_settings, helper_hash, lease)
+    finalize_removal(&root, &mut tx, helper_hash, lease)
+}
+
+/// Read the durable purge choice without starting or recovering maintenance.
+/// # Errors
+/// Fails if the fixed installation path or pending transaction metadata is invalid.
+pub fn uninstall_purge_pending() -> io::Result<bool> {
+    let root = super::install_root()?;
+    let tx: Transaction = match read_json(&root.join("state/transaction.json")) {
+        Ok(tx) => tx,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    pending_purge_settings(&tx)
+}
+
+fn validate_uninstall_transaction(tx: &Transaction) -> io::Result<()> {
+    if tx.schema_version != 1 || !request::valid_id(&tx.id) {
+        return Err(invalid("invalid uninstall transaction"));
+    }
+    validate_ownership(&tx.before)?;
+    validate_ownership(&tx.after)
+}
+
+pub(super) fn pending_purge_settings(tx: &Transaction) -> io::Result<bool> {
+    validate_uninstall_transaction(tx)?;
+    Ok(tx.removing && tx.preferences == super::PreferencesDisposition::Purge)
+}
+
+/// An irreversible purge choice survives later retries requesting preservation.
+pub(super) fn record_purge_settings(tx: &mut Transaction, selected: bool) {
+    if selected {
+        tx.preferences = super::PreferencesDisposition::Purge;
+    }
 }
 
 fn finalize_removal(
     root: &Path,
     tx: &mut Transaction,
-    purge_settings: bool,
     helper_hash: Option<String>,
     lease: File,
 ) -> io::Result<UninstallOutcome> {
     let mut retained_unknown = cleanup_user_requests();
-    finalize_preferences(tx, purge_settings)?;
-    for name in [
-        "InstallRoot",
-        "ActiveVersion",
-        "State",
-        "PackagePublisher",
-        "PackageName",
-        "Architecture",
-        "PathOwned",
-    ] {
-        registry::write(INSTALL_KEY, name, None)?;
-    }
-    registry::remove_empty(INSTALL_KEY);
-    // No installed entry point can acquire a new task after this point. Release the lease
-    // before deleting its file, without enabling delete-sharing during normal operation.
-    drop(lease);
+    let mut lease = Some(lease);
     let cleanup = (|| {
+        // The helper has already been removed. Every remaining fallible step must
+        // share the recovery path that restores its retry entry.
+        finalize_preferences(tx)?;
+        for name in [
+            "InstallRoot",
+            "ActiveVersion",
+            "State",
+            "PackagePublisher",
+            "PackageName",
+            "Architecture",
+            "PathOwned",
+        ] {
+            registry::write(INSTALL_KEY, name, None)?;
+        }
+        registry::remove_empty(INSTALL_KEY);
+        // Release the lease only before deleting its file; earlier failures
+        // retain maintenance exclusion while the retry entry is restored.
+        drop(lease.take());
         remove_internal_file(root, Path::new("state/ownership.json"), None, None)?;
         remove_internal_file(root, Path::new("state/transaction.json"), None, None)?;
         remove_internal_file(
@@ -252,21 +287,25 @@ fn cleanup_user_requests() -> bool {
     retained_unknown
 }
 
-fn finalize_preferences(tx: &Transaction, purge_settings: bool) -> io::Result<()> {
+fn finalize_preferences(tx: &Transaction) -> io::Result<()> {
     // Preferences survive uninstall; restore the pre-uninstall menu preference for the next installation.
-    if purge_settings {
+    if tx.preferences == super::PreferencesDisposition::Purge {
         for name in ["Language", "MenusEnabled", "PathEnabled"] {
             registry::write(SETTINGS_KEY, name, None)?;
         }
         registry::remove_empty(SETTINGS_KEY);
         purge_logs()?;
-    } else {
-        let before_menu = tx
-            .registry
-            .iter()
-            .find(|c| c.key == SETTINGS_KEY && c.name == "MenusEnabled")
-            .and_then(|c| c.before.as_ref());
-        registry::write(SETTINGS_KEY, "MenusEnabled", before_menu)?;
+    } else if let Some(change) = menu_preference_restore(&tx.registry) {
+        registry::write(SETTINGS_KEY, "MenusEnabled", change.before.as_ref())?;
     }
     Ok(())
+}
+
+/// No recorded change means an already-disabled preference must remain intact.
+pub(super) fn menu_preference_restore(
+    changes: &[super::RegistryChange],
+) -> Option<&super::RegistryChange> {
+    changes
+        .iter()
+        .find(|change| change.key == SETTINGS_KEY && change.name == "MenusEnabled")
 }

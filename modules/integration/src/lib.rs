@@ -15,13 +15,13 @@ use std::{
 use serde::{Deserialize, Serialize};
 use windows::{
     Win32::{
-        Foundation::HANDLE,
+        Foundation::{ERROR_LOCK_VIOLATION, HANDLE},
         Storage::FileSystem::{
             LOCK_FILE_FLAGS, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx,
         },
         System::IO::OVERLAPPED,
     },
-    core::PCWSTR,
+    core::{HRESULT, PCWSTR},
 };
 
 pub mod maintenance;
@@ -213,7 +213,19 @@ pub(crate) fn lock(root: &Path, exclusive: bool) -> io::Result<File> {
             &raw mut overlapped,
         )
     }
-    .map_err(|error| io::Error::new(io::ErrorKind::WouldBlock, error.to_string()))?;
+    .map_err(|error| {
+        let busy = error.code() == HRESULT::from_win32(ERROR_LOCK_VIOLATION.0);
+        let message = format!(
+            "failed to acquire installation activity lock at {}: {}",
+            root.display(),
+            WindowsFailure(error)
+        );
+        if busy {
+            io::Error::new(io::ErrorKind::WouldBlock, message)
+        } else {
+            io::Error::other(message)
+        }
+    })?;
     Ok(file)
 }
 

@@ -52,7 +52,13 @@ pub(crate) fn find(publisher: &str) -> io::Result<Vec<Package>> {
     let mut result = Vec::new();
     for package in packages {
         let id = package.Id().map_err(win_error)?;
-        if id.Name().map_err(win_error)? != PACKAGE_NAME {
+        // Package names are ASCII package strings and compare without case; Publisher does not.
+        if !id
+            .Name()
+            .map_err(win_error)?
+            .to_string()
+            .eq_ignore_ascii_case(PACKAGE_NAME)
+        {
             continue;
         }
         if id.Publisher().map_err(win_error)? != publisher

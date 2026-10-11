@@ -10,6 +10,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod flags;
+
 pub(crate) struct Options {
     pub publisher: Option<String>,
     pub certificate_thumbprint: Option<String>,
@@ -80,7 +82,6 @@ pub(crate) fn run(options: &Options) -> io::Result<()> {
         .clone()
         .or_else(|| env::var_os("UNLINKA_ISCC").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("ISCC.exe"));
-    let signtool = sdk.join("signtool.exe");
     if options.signed() {
         verify_certificate(options)?;
     }
@@ -99,13 +100,6 @@ pub(crate) fn run(options: &Options) -> io::Result<()> {
     let binaries = build_binaries(&context)?;
     let payload = build_payload(&context, &binaries)?;
     let setup = build_installer(&context, &payload, &iscc)?;
-    if options.signed() {
-        checked(
-            Command::new(&signtool)
-                .args(["verify", "/pa", "/all"])
-                .arg(&setup),
-        )?;
-    }
     eprintln!("Package built: {}", setup.display());
     eprintln!(
         "{}",
@@ -135,8 +129,8 @@ fn build_binaries(context: &PackageBuild<'_>) -> io::Result<PathBuf> {
         assets,
         sdk,
         options,
-        identity,
         version,
+        ..
     } = context;
     let app_resource = compile_resource(assets, output, sdk, version, false)?;
     let dll_resource = compile_resource(assets, output, sdk, version, true)?;
@@ -148,47 +142,7 @@ fn build_binaries(context: &PackageBuild<'_>) -> io::Result<PathBuf> {
             "unsigned"
         });
     let mut build = Command::new("cargo");
-    build
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--target",
-            "x86_64-pc-windows-msvc",
-            "-p",
-            "unlinka",
-            "-p",
-            "unlinka-desktop",
-            "-p",
-            "unlinka-integration",
-            "-p",
-            "unlinka-launcher",
-            "-p",
-            "unlinka-shell",
-        ])
-        .current_dir(root)
-        .env("CARGO_TARGET_DIR", &target)
-        .env(
-            "UNLINKA_SIGNED_BUILD",
-            if options.signed() { "1" } else { "0" },
-        )
-        .env("UNLINKA_PACKAGE_VERSION", version)
-        .env("UNLINKA_WINDOWS_RESOURCE", &app_resource)
-        .env("UNLINKA_DLL_RESOURCE", &dll_resource);
-    if options.signed() {
-        build
-            .env("UNLINKA_PACKAGE_NAME", &identity.package_name)
-            .env("UNLINKA_PACKAGE_PUBLISHER", options.publisher())
-            .env("UNLINKA_PACKAGE_APP_ID", &identity.application_id);
-    } else {
-        for name in [
-            "UNLINKA_PACKAGE_NAME",
-            "UNLINKA_PACKAGE_PUBLISHER",
-            "UNLINKA_PACKAGE_APP_ID",
-        ] {
-            build.env_remove(name);
-        }
-    }
+    flags::configure(&mut build, context, &target, &app_resource, &dll_resource)?;
     checked(&mut build)?;
     Ok(target.join("x86_64-pc-windows-msvc/release"))
 }
@@ -280,6 +234,7 @@ fn build_installer(context: &PackageBuild<'_>, payload: &Path, iscc: &Path) -> i
         options.signed(),
     )?;
     let settings_key = "Software\\Unlinka\\Settings";
+    let installation_key = "Software\\Unlinka\\Installation";
     let mut compile = Command::new(iscc);
     configure_installer_signing(&mut compile, context, &script_dir)?;
     for (key, value) in [
@@ -296,6 +251,7 @@ fn build_installer(context: &PackageBuild<'_>, payload: &Path, iscc: &Path) -> i
         ("AppId", identity.app_id.clone()),
         ("InstallName", identity.install_name.clone()),
         ("SettingsKey", settings_key.to_owned()),
+        ("InstallationKey", installation_key.to_owned()),
         (
             "SignedBuild",
             if options.signed() { "1" } else { "0" }.to_owned(),
@@ -558,6 +514,7 @@ END
     checked(
         Command::new(sdk.join("rc.exe"))
             .arg("/nologo")
+            .arg("/c65001")
             .arg("/I")
             .arg(sdk_root.join("Include").join(sdk_version).join("um"))
             .arg("/I")

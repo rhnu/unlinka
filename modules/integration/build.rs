@@ -1,8 +1,10 @@
 use std::{env, fmt::Write, fs, path::PathBuf};
 
+#[path = "../../packaging/windows.rs"]
+mod windows;
+
 fn main() {
-    println!("cargo:rerun-if-env-changed=UNLINKA_WINDOWS_RESOURCE");
-    println!("cargo:rerun-if-env-changed=UNLINKA_PACKAGE_VERSION");
+    windows::embed("unlinka-maintenance", None);
     println!("cargo:rerun-if-env-changed=UNLINKA_PACKAGE_PUBLISHER");
     println!("cargo:rerun-if-env-changed=UNLINKA_SIGNED_BUILD");
     let signed = match env::var("UNLINKA_SIGNED_BUILD") {
@@ -19,15 +21,6 @@ fn main() {
             "signed builds require a nonempty UNLINKA_PACKAGE_PUBLISHER"
         );
         println!("cargo:rustc-env=UNLINKA_PACKAGE_PUBLISHER={publisher}");
-    }
-    if let Some(resource) = env::var_os("UNLINKA_WINDOWS_RESOURCE") {
-        println!(
-            "cargo:rustc-link-arg-bin=unlinka-maintenance={}",
-            PathBuf::from(resource).display()
-        );
-    }
-    if let Ok(version) = env::var("UNLINKA_PACKAGE_VERSION") {
-        println!("cargo:rustc-env=UNLINKA_PACKAGE_VERSION={version}");
     }
     println!("cargo:rerun-if-changed=../../packaging/identity.json");
     let identity: serde_json::Value = serde_json::from_slice(

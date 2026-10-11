@@ -1,5 +1,7 @@
 use super::{Payload, PayloadFile, relative, validate_version};
 
+mod recovery;
+
 fn test_payload(signed: bool) -> Payload {
     let mut files: Vec<_> = ["unlinka.exe", "unlinka-desktop.exe", "unlinka-shell.dll"]
         .into_iter()
@@ -102,6 +104,7 @@ fn package_rollback_uses_the_policy_that_could_have_registered_the_package() {
         schema_version: 1,
         id: String::new(),
         removing: false,
+        preferences: super::PreferencesDisposition::Retain,
         committed: false,
         before_install: None,
         before: signed.clone(),
@@ -138,6 +141,7 @@ fn installed_helper_accepts_current_and_journal_owned_recovery_hashes() {
         schema_version: 1,
         id: "00000000-0000-0000-0000-000000000001".into(),
         removing: false,
+        preferences: super::PreferencesDisposition::Retain,
         committed: false,
         before_install: None,
         before: owned.clone(),
@@ -178,6 +182,7 @@ fn installed_helper_rejects_invalid_or_foreign_transaction_metadata() {
         schema_version: 1,
         id: "00000000-0000-0000-0000-000000000001".into(),
         removing: false,
+        preferences: super::PreferencesDisposition::Retain,
         committed: false,
         before_install: None,
         before: owned.clone(),

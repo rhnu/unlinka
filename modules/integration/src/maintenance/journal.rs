@@ -163,6 +163,7 @@ pub(super) fn begin(
         schema_version: 1,
         id: guid()?,
         removing,
+        preferences: super::PreferencesDisposition::Retain,
         committed: false,
         before_install,
         after: before.clone(),

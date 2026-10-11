@@ -5,8 +5,8 @@ mod files;
 mod uninstall;
 use artifacts::{cleanup_artifacts, file_identity, remove_internal_file};
 use diagnostics::purge_logs;
-pub use diagnostics::{integration_status, log_diagnostic, runtime_copy};
-pub use uninstall::uninstall;
+pub use diagnostics::{integration_status, log_diagnostic, run_installed, runtime_copy};
+pub use uninstall::{uninstall, uninstall_purge_pending};
 mod journal;
 mod payload;
 mod user_path;
@@ -132,12 +132,21 @@ struct FileIdentity {
     low: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+enum PreferencesDisposition {
+    #[default]
+    Retain,
+    Purge,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Transaction {
     schema_version: u32,
     id: String,
     removing: bool,
+    #[serde(default)]
+    preferences: PreferencesDisposition,
     committed: bool,
     before_install: Option<Installation>,
     before: Ownership,

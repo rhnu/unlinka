@@ -1,9 +1,9 @@
 use std::os::windows::process::CommandExt;
 
 use super::{
-    BTreeMap, Command, Installation, OpenOptions, OpenOptionsExt, OsStrExt, OsString, PathBuf,
-    Write, check_no_reparse, copy_file, fs, guid, hash, invalid, io, load_ownership, package,
-    path_present, read_json, read_settings, registry, request, save_json, security,
+    BTreeMap, Command, File, Installation, OpenOptions, OpenOptionsExt, OsStrExt, OsString, Path,
+    PathBuf, Write, check_no_reparse, copy_file, fs, guid, hash, invalid, io, load_ownership,
+    package, path_present, read_json, read_settings, registry, request, save_json, security,
 };
 
 /// # Errors
@@ -113,10 +113,7 @@ pub(super) fn purge_logs() -> io::Result<()> {
 /// child process cannot be started.
 pub fn runtime_copy(args: &[OsString]) -> io::Result<Option<i32>> {
     let executable = std::env::current_exe()?;
-    let base = crate::user_data()?.join(crate::DATA_NAME);
-    let _base = security::private_dir(&base)?;
-    let runtime_root = base.join("maintenance");
-    let _runtime = security::private_dir(&runtime_root)?;
+    let (runtime_root, _base, _runtime) = prepare_runtime_root()?;
     if executable.starts_with(&runtime_root) {
         check_no_reparse(&executable)?;
         let parent = executable
@@ -141,23 +138,61 @@ pub fn runtime_copy(args: &[OsString]) -> io::Result<Option<i32>> {
         verify_runtime_signature(&executable)?;
         return Ok(None);
     }
-    verify_installed_helper(&executable)?;
+    let owned_hash = verify_installed_helper(&executable)?;
     verify_runtime_signature(&executable)?;
-    let expected = hash(&executable)?;
+    let expected = match owned_hash {
+        Some(expected) => expected,
+        None => hash(&executable)?,
+    };
+    run_runtime(&executable, args, &runtime_root, &expected).map(Some)
+}
+
+/// Runs an owned maintenance copy without keeping the installed helper mapped.
+///
+/// # Errors
+/// Fails for a missing installation, reparse path, unowned helper, invalid copied
+/// hash or a runtime process that cannot be started.
+pub fn run_installed(args: &[OsString]) -> io::Result<i32> {
+    let installation =
+        Installation::current()?.ok_or_else(|| invalid("installation is missing"))?;
+    let executable = installation
+        .root
+        .join("maintenance/unlinka-maintenance.exe");
+    let expected = verify_installed_helper(&executable)?
+        .ok_or_else(|| invalid("maintenance helper is outside the installation"))?;
+    let (runtime_root, _base, _runtime) = prepare_runtime_root()?;
+    // The owned helper may belong to a pending upgrade with a different signing
+    // policy than this desktop. The copied helper verifies its own build policy.
+    run_runtime(&executable, args, &runtime_root, &expected)
+}
+
+fn prepare_runtime_root() -> io::Result<(PathBuf, File, File)> {
+    let base = crate::user_data()?.join(crate::DATA_NAME);
+    let base_guard = security::private_dir(&base)?;
+    let runtime_root = base.join("maintenance");
+    let runtime_guard = security::private_dir(&runtime_root)?;
+    Ok((runtime_root, base_guard, runtime_guard))
+}
+
+fn run_runtime(
+    executable: &Path,
+    args: &[OsString],
+    runtime_root: &Path,
+    expected: &str,
+) -> io::Result<i32> {
     let directory = runtime_root.join(guid()?);
     let private_guard = security::private_dir(&directory)?;
     let copied = directory.join("unlinka-maintenance.exe");
-    copy_file(&executable, &copied)?;
+    copy_file(executable, &copied)?;
     if expected != hash(&copied)? {
         return Err(invalid("maintenance runtime copy verification failed"));
     }
-    verify_runtime_signature(&copied)?;
     save_json(&directory.join("runtime.json"), &expected)?;
 
     let exit = Command::new(&copied)
         .args(args)
         .creation_flags(0x0800_0000)
-        .status()?;
+        .status();
     // Parent owns the copy and waits until it is no longer running before removing it.
     if let Err(error) = fs::remove_file(&copied) {
         let _ignored = log_diagnostic(&format!(
@@ -178,7 +213,7 @@ pub fn runtime_copy(args: &[OsString]) -> io::Result<Option<i32>> {
             directory.display()
         ));
     }
-    Ok(Some(exit.code().unwrap_or(2)))
+    exit.map(|status| status.code().unwrap_or(2))
 }
 
 fn verify_runtime_signature(executable: &std::path::Path) -> io::Result<()> {
@@ -194,16 +229,18 @@ fn verify_runtime_signature(executable: &std::path::Path) -> io::Result<()> {
 }
 
 /// An installed unsigned helper must still be the exact owned stable binary.
-fn verify_installed_helper(executable: &std::path::Path) -> io::Result<()> {
+fn verify_installed_helper(executable: &Path) -> io::Result<Option<String>> {
     let root = crate::install_root()?;
     if !executable.starts_with(&root) {
-        return Ok(());
+        return Ok(None);
     }
     if executable != root.join("maintenance/unlinka-maintenance.exe") {
         return Err(invalid(
             "maintenance helper is not the owned stable entry point",
         ));
     }
+    check_no_reparse(executable)?;
+    let actual = hash(executable)?;
     let ownership = load_ownership(&root)?;
     let transaction: Option<super::Transaction> =
         match read_json(&root.join("state/transaction.json")) {
@@ -211,12 +248,12 @@ fn verify_installed_helper(executable: &std::path::Path) -> io::Result<()> {
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-    if !installed_helper_hash_owned(&ownership, transaction.as_ref(), &hash(executable)?)? {
+    if !installed_helper_hash_owned(&ownership, transaction.as_ref(), &actual)? {
         return Err(invalid(
             "installed maintenance helper failed ownership verification",
         ));
     }
-    Ok(())
+    Ok(Some(actual))
 }
 
 /// A replaced helper can reach recovery before the new ownership record is committed.

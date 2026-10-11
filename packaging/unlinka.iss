@@ -18,6 +18,7 @@ AppVerName={#InstallName} {#AppVersion}
 DefaultDirName={localappdata}\Programs\{#InstallName}
 DisableDirPage=yes
 UsePreviousAppDir=no
+AllowCancelDuringInstall=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
@@ -60,7 +61,9 @@ Type: dirifempty; Name: "{app}"
 [Code]
 var
   LanguagePage: TInputOptionWizardPage;
-  Installed: Boolean;
+  PayloadExtracted: Boolean;
+  InstallParameters, InstallFailure: String;
+  SkipUninstallMaintenance: Boolean;
   UninstallHelper: String;
 
 function BoolText(Value: Boolean): String;
@@ -73,6 +76,8 @@ var
   LanguageValue, SelectedTasks: String;
   MenusValue, PathValue: Cardinal;
 begin
+  { /DIR and /LOADINF must not move Inno's metadata away from the helper's root. }
+  WizardForm.DirEdit.Text := ExpandConstant('{localappdata}\Programs\{#InstallName}');
   LanguagePage := CreateInputOptionPage(wpSelectTasks, CustomMessage('LanguageTitle'),
     CustomMessage('LanguagePrompt'), '', True, False);
   LanguagePage.Add(CustomMessage('LanguageAuto'));
@@ -96,27 +101,79 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Parameters, LanguageValue: String;
-  ResultCode: Integer;
+  LanguageValue: String;
 begin
   Result := '';
-  if Installed then Exit;
-  ExtractTemporaryFiles('{tmp}\tools\*');
-  ExtractTemporaryFiles('{tmp}\payload\*');
+  WizardForm.DirEdit.Text := ExpandConstant('{localappdata}\Programs\{#InstallName}');
+  if not PayloadExtracted then begin
+    ExtractTemporaryFiles('{tmp}\tools\*');
+    ExtractTemporaryFiles('{tmp}\payload\*');
+    PayloadExtracted := True;
+  end;
   LanguageValue := 'auto';
   if LanguagePage.SelectedValueIndex = 1 then LanguageValue := 'zh-CN';
   if LanguagePage.SelectedValueIndex = 2 then LanguageValue := 'en-US';
-  Parameters := 'install --source "' + ExpandConstant('{tmp}\payload') +
+  InstallParameters := 'install --source "' + ExpandConstant('{tmp}\payload') +
     '" --launcher "' + ExpandConstant('{tmp}\tools\unlinka-launcher.exe') +
     '" --maintenance "' + ExpandConstant('{tmp}\tools\unlinka-maintenance.exe') +
     '" --language ' + LanguageValue + ' --menus ' + BoolText(WizardIsTaskSelected('menus')) +
     ' --path ' + BoolText(WizardIsTaskSelected('path'));
-  if not Exec(ExpandConstant('{tmp}\tools\unlinka-maintenance.exe'), Parameters,
+end;
+
+procedure RestoreInstalledShellEntries;
+var
+  InstalledRoot, ActiveVersion, DesktopExe, Shortcut: String;
+begin
+  if not RegQueryStringValue(HKCU64, '{#InstallationKey}', 'InstallRoot', InstalledRoot) then Exit;
+  if CompareText(InstalledRoot, ExpandConstant('{app}')) <> 0 then Exit;
+  if not RegQueryStringValue(HKCU64, '{#InstallationKey}', 'ActiveVersion', ActiveVersion) then Exit;
+  if (Pos('\', ActiveVersion) <> 0) or (Pos('/', ActiveVersion) <> 0) or
+    (Pos('..', ActiveVersion) <> 0) then Exit;
+  DesktopExe := InstalledRoot + '\versions\' + ActiveVersion + '\unlinka-desktop.exe';
+  if not FileExists(DesktopExe) then Exit;
+  Shortcut := ExpandConstant('{userprograms}\{#InstallName}.lnk');
+  if FileExists(Shortcut) then
+    CreateShellLink(Shortcut, '', DesktopExe, '--settings', InstalledRoot, '', 0, SW_SHOWNORMAL);
+  if not RegWriteStringValue(HKCU64,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{{#AppId}}_is1',
+    'DisplayIcon', DesktopExe) then
+    Log('Could not restore the previous uninstall display icon.');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep <> ssPostInstall then Exit;
+  { Inno has saved its uninstall entry and log before the helper publishes payloads.
+    A failed helper rolls back its own transaction; the Inno entry remains usable. }
+  if not Exec(ExpandConstant('{tmp}\tools\unlinka-maintenance.exe'), InstallParameters,
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    Result := CustomMessage('MaintenanceFailed')
+    InstallFailure := CustomMessage('MaintenanceFailed')
   else if ResultCode <> 0 then
-    Result := CustomMessage('MaintenanceFailed') + ' (' + IntToStr(ResultCode) + ')'
-  else Installed := True;
+    InstallFailure := CustomMessage('MaintenanceFailed') + ' (' + IntToStr(ResultCode) + ')';
+  if InstallFailure <> '' then begin
+    Log(InstallFailure);
+    try
+      RestoreInstalledShellEntries;
+    except
+      Log('Could not restore the previous shortcut: ' + GetExceptionMessage);
+    end;
+    MsgBox(InstallFailure, mbError, MB_OK);
+  end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if InstallFailure <> '' then Result := 1 else Result := 0;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and (InstallFailure <> '') then begin
+    WizardForm.FinishedHeadingLabel.Caption := CustomMessage('MaintenanceFailed');
+    WizardForm.FinishedLabel.Caption := InstallFailure;
+  end;
 end;
 
 function InitializeUninstall: Boolean;
@@ -124,6 +181,13 @@ begin
   { InitializeUninstall runs before Inno's confirmation. Do not mutate the
     installation until usAppMutexCheck, which runs after that confirmation. }
   Result := False;
+  { A rolled-back first install or a completed helper uninstall can leave only
+    Inno's records. Do not block their cleanup on a helper that no longer exists. }
+  SkipUninstallMaintenance := not RegValueExists(HKCU64, '{#InstallationKey}', 'InstallRoot');
+  if SkipUninstallMaintenance then begin
+    Result := True;
+    Exit;
+  end;
   if not FileExists(ExpandConstant('{app}\maintenance\unlinka-maintenance.exe')) then begin
     MsgBox(CustomMessage('RepairFirst'), mbError, MB_OK);
     Exit;
@@ -143,6 +207,7 @@ var
   ResultCode: Integer;
 begin
   if CurUninstallStep <> usAppMutexCheck then Exit;
+  if SkipUninstallMaintenance then Exit;
   { Abort exits silently before Inno removes its ARP, log, or shortcut. The
     helper adds its own confirmation with the option to purge preferences. }
   if not Exec(UninstallHelper, 'uninstall', ExpandConstant('{localappdata}'),

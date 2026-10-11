@@ -99,6 +99,8 @@ pub(super) fn edit_path(root: &Path, tx: &mut Transaction, enabled: bool) -> io:
         .as_os_str()
         .encode_wide()
         .collect::<Vec<_>>();
+    let original_ownership = tx.after.path_owned.clone();
+    let original_intents = tx.path.len();
     let (tokens, ownership, change) = plan_path(
         path_tokens(&value)?,
         &bin,
@@ -119,8 +121,17 @@ pub(super) fn edit_path(root: &Path, tx: &mut Transaction, enabled: bool) -> io:
     if !changed {
         return Ok(());
     }
-    if registry::read("Environment", "Path")? != before {
-        return Err(invalid("user PATH changed during maintenance; retry"));
+    let conflict = match registry::read("Environment", "Path") {
+        Ok(current) if current == before => None,
+        Ok(_) => Some(invalid("user PATH changed during maintenance; retry")),
+        Err(error) => Some(error),
+    };
+    if let Some(error) = conflict {
+        // No PATH write happened. Recovery must not undo a concurrent user's
+        // edit merely because the write-ahead intent was already saved.
+        cancel_unwritten_path_edit(tx, original_ownership, original_intents);
+        tx.save(root)?;
+        return Err(error);
     }
     registry::write(
         "Environment",
@@ -128,6 +139,16 @@ pub(super) fn edit_path(root: &Path, tx: &mut Transaction, enabled: bool) -> io:
         Some(&path_value(&tokens, value.kind)),
     )?;
     tx.save(root)
+}
+
+/// Restore the transaction checkpoint after rejecting a PATH write before mutation.
+pub(super) fn cancel_unwritten_path_edit(
+    tx: &mut Transaction,
+    original_ownership: Option<Vec<u16>>,
+    original_intents: usize,
+) {
+    tx.path.truncate(original_intents);
+    tx.after.path_owned = original_ownership;
 }
 
 type PathPlan = (Vec<Vec<u16>>, Option<Vec<u16>>, Option<(Vec<u16>, bool)>);

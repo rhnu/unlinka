@@ -1,15 +1,14 @@
-use std::{io, os::windows::process::CommandExt, process::Command};
+use std::{ffi::OsString, io};
 
 use unlinka_i18n::Translator;
-use unlinka_integration::{Installation, read_settings};
+use unlinka_integration::{Installation, maintenance, read_settings};
 
 use crate::native;
 const CANCEL: i32 = 2;
 
 /// Stages all choices locally, then delegates one atomic maintenance transaction.
 pub(crate) fn show(tr: &Translator) -> io::Result<u8> {
-    let installation =
-        Installation::current()?.ok_or_else(|| io::Error::other(tr.text("settings-portable")))?;
+    Installation::current()?.ok_or_else(|| io::Error::other(tr.text("settings-portable")))?;
     let settings = read_settings()?;
     let selected = native::dialog(
         tr,
@@ -42,18 +41,13 @@ pub(crate) fn show(tr: &Translator) -> io::Result<u8> {
     if selected == CANCEL {
         return Ok(3);
     }
-    let helper = installation
-        .root
-        .join("maintenance/unlinka-maintenance.exe");
-    let mut command = Command::new(helper);
-    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; settings are already in native dialogs.
-    if selected == 1002 {
-        command.arg("repair");
+    let arguments: Vec<OsString> = if selected == 1002 {
+        vec!["repair".into()]
     } else {
         let Some(updated) = choose_settings(tr, settings)? else {
             return Ok(3);
         };
-        command.args([
+        [
             "configure",
             "--language",
             &updated.language,
@@ -69,26 +63,25 @@ pub(crate) fn show(tr: &Translator) -> io::Result<u8> {
             } else {
                 "false"
             },
-        ]);
-    }
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .collect()
+    };
     // Do not hold an AppLease: maintenance needs the exclusive lock itself.
-    let status = command.status()?;
-    if status.code() == Some(3) {
+    let code = maintenance::run_installed(&arguments)?;
+    if code == 3 {
         // The helper's wait dialog returns this code when maintenance is cancelled.
         return Ok(3);
     }
-    if status.success() {
+    if code == 0 {
         native::message(tr, &tr.text("settings-title"), &tr.text("settings-saved"))?;
         Ok(0)
     } else {
         native::message(
             tr,
             &tr.text("error-maintenance"),
-            &format!(
-                "{} ({})",
-                tr.text("error-maintenance"),
-                status.code().unwrap_or(1)
-            ),
+            &format!("{} ({code})", tr.text("error-maintenance")),
         )?;
         Ok(1)
     }

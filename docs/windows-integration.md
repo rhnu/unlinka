@@ -178,7 +178,9 @@ DLL 从所属安装根和活动版本定位桌面程序，使用显式绝对程�
 
 Inno Setup 负责安装向导、文件部署入口和稳定 AppId；`unlinka-maintenance.exe` 负责可重试的状态、注册、PATH 和包部署操作。辅助工具和稳定启动器只在没有运行任务的维护阶段更新。
 
-Inno 脚本固定 `PrivilegesRequired=lowest`、`DisableDirPage=yes`、`CloseApplications=no`、`RestartApplications=no`。所有维护动作由核验过的安装根外运行副本执行，以便替换安装根内的辅助工具。版本 payload、产品注册和 PATH 的卸载由维护清单负责，不能让 Inno 再执行一套未经归属校验的重复清理。
+Inno 脚本固定 `PrivilegesRequired=lowest`、`DisableDirPage=yes`、`AllowCancelDuringInstall=no`、`CloseApplications=no`、`RestartApplications=no`。向导初始化和安装准备阶段强制固定目录，`/DIR` 与 `/LOADINF` 不能让 Inno 的卸载记录与维护工具的安装根分离。准备阶段只解包并保存参数；`ssPostInstall` 在 Inno 保存卸载器与产品条目之后调用维护工具。维护失败返回非零安装退出码并显示失败文案；升级回滚后恢复原活动版本的快捷方式与显示图标。没有 Installation 记录而只剩 Inno 元数据时，卸载器仍可清理自己的记录。
+
+所有维护动作由核验过的安装根外运行副本执行，以便替换安装根内的辅助工具。设置界面先检查稳定维护工具的完整路径、文件归属和事务认可的哈希，再复制并直接运行副本，避免稳定维护 EXE 被等待中的父进程占用。版本 payload、产品注册和 PATH 的卸载由维护清单负责，不能让 Inno 再执行一套未经归属校验的重复清理。
 
 CLI、桌面确认和删除任务持有共享 activity lock；维护必须取得独占锁。有任务运行时，提示等待完成或取消本次维护，不结束删除进程。菜单请求与维护竞争时，桌面任务应显示维护中诊断，不开始删除。
 
@@ -188,7 +190,7 @@ CLI、桌面确认和删除任务持有共享 activity lock；维护必须取得
 
 只有文件、所选集成项、适用的包注册和安装状态均核对成功才能提交 `Ready`。失败按相反顺序补偿；恢复失败进入 `RepairRequired`，保留旧/新 payload、日志和维护入口，不显示安装成功。
 
-启动下一次安装、修复或卸载时先处理未完成事务。PATH 回滚只逆转本安装的修改，不能覆盖事务期间其他程序或用户的环境修改。
+启动下一次安装、修复或卸载时先处理未完成事务。PATH 回滚只逆转本安装的修改，不能覆盖事务期间其他程序或用户的环境修改。写入前发现并发冲突时撤销尚未执行的 PATH intent，防止回滚误删外部刚加入的同名项。活动锁只有实际锁竞争返回“忙碌”；其他 Windows 错误保留安装位置和 HRESULT。
 
 `signed=false` 不跳过 SHA-256、请求 ACL、维护锁、ownership、路径包含关系或事务日志保护。`signed=true` 的运行副本、EXE/DLL 和适用身份包须通过签名核验；清单和签名状态不一致时拒绝安装。
 
@@ -219,6 +221,7 @@ CLI、桌面确认和删除任务持有共享 activity lock；维护必须取得
 
 - 复验活动版本文件、经典注册、适用的 Windows 11 身份包及 external location、PATH 所有权；保留用户设置。
 - 文件缺失或损坏时从同版本、签名状态一致且通过核验的安装包恢复；被加载文件无法替换时保留状态并提示重试，不宣告修复完成。
+- 设置界面的维护副本不会映射稳定维护 EXE；直接从安装目录调用维护命令仍会等待其副本。在中断升级需要回滚维护 EXE 本身的场景，等待中的原进程可能阻止替换，应重新运行当前或更新 Setup 恢复，不能将稳定命令重试视为已验证的恢复路径。
 - 关闭“Explorer 菜单”先禁止新的调用，再移除两种入口；CLI 仍可使用。
 - 开启菜单按当前构建签名状态和系统注册全部适用入口，成功后恢复启用状态。
 - 更新语言不重装程序；两种菜单下次构建和新任务使用新语言，正在执行的任务保持原语言。
@@ -237,7 +240,9 @@ CLI、桌面确认和删除任务持有共享 activity lock；维护必须取得
 
 Inno 的 `InitializeUninstall` 只校验并复制维护工具至临时目录。Inno 内建卸载确认之后，`CurUninstallStepChanged(usAppMutexCheck)` 执行临时副本；辅助工具再提供包含保留/清除偏好的原生确认。成功后才允许 Inno 删除其产品条目、日志与快捷方式；取消、`RemovalPending` 或失败以 `Abort` 中止最终清理。不能等待仍映射在安装根内的维护 EXE，否则它无法删除自己。直接运行已安装维护工具的卸载命令会转交 Inno 卸载入口。再次卸载从剩余步骤继续；若包尚未移除，保留其所需 payload。[Inno 事件文档](https://jrsoftware.org/ishelp/topic_scriptevents.htm)、[7.1 卸载确认顺序](https://github.com/jrsoftware/issrc/blob/is-7_1_0/Projects/Src/Setup.Uninstall.pas#L670)
 
-默认保留 `Settings` 中的语言偏好和有界维护日志，提供“同时删除设置和诊断日志”选项。请求和操作记录不保留为可再次执行的队列。不删除证书信任、其他安装的注册项、用户改动的 PATH 或未知文件。
+默认保留 `Settings` 中的语言、菜单和 PATH 偏好及有界维护日志，提供“同时删除设置和诊断日志”选项。已经关闭菜单时，卸载临时禁用菜单不产生变更记录，收尾也不删除原有禁用偏好。偏好、安装注册表和内部文件收尾失败均走同一恢复路径，恢复维护入口并保留 `RemovalPending`。请求和操作记录不保留为可再次执行的队列。不删除证书信任、其他安装的注册项、用户改动的 PATH 或未知文件。
+
+清除偏好的选择在删除前保存到卸载事务，失败后重试默认继续该选择。清除已经开始后不能通过下一次取消勾选恢复已删除的数据，收尾按持久化选择继续，避免部分偏好恢复而其他偏好丢失。
 
 若卸载在删除维护工具后中断，仍有卸载事务但根内工具缺失时，重新运行通过核验的 Setup 只恢复核验过的维护工具、保留 `RemovalPending` 并提示重跑卸载，不发布新 payload 或继续普通安装。未知文件保留并报告，不能仅因目录非空而永久进入待清理状态。
 
@@ -277,7 +282,7 @@ Inno 的 `InitializeUninstall` 只校验并复制维护工具至临时目录。I
 
 Shell 不链接删除引擎；core 不依赖 i18n、注册表设置或 Shell。COM 与包部署采用 `windows` 0.62.2 及匹配的 `windows-core`，已有 core 的 `windows-sys` 调用保持现状。Fluent 使用 `fluent-bundle` 0.16.0 / `unic-langid` 0.9.6；版本与 features 在 [Cargo.toml](../Cargo.toml) 声明并通过 Cargo.lock 固定。
 
-所有构建先生成版本、构建程序并嵌入资源。默认未签名构建直接生成 payload 和 Setup，不生成身份包或桌面包身份。可选签名构建先签名 EXE/DLL、构建并签名身份包，再构建并签名 Setup；签名后不能改写二进制。签名构建必须核对包 Publisher、程序身份和证书 Subject 一致。
+所有构建先生成版本、构建程序并嵌入资源。四个 EXE 共用 Windows manifest 与构建辅助模块，均声明 Common Controls v6；只有签名桌面构建额外嵌入 MSIX 身份。打包产物静态链接 MSVC CRT，不要求另装 VC++ 运行库；RC 显式使用 UTF-8 读取资源脚本和路径。默认未签名构建直接生成 payload 和 Setup，不生成身份包或桌面包身份。可选签名构建先签名 EXE/DLL、构建并签名身份包，再构建并签名 Setup；签名后不能改写二进制。签名构建必须核对包 Publisher、程序身份和证书 Subject 一致。
 
 ### 6.1 构建统一安装包
 
