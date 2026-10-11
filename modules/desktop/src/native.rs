@@ -1,6 +1,8 @@
+mod details;
+
 use std::{
     io,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -9,25 +11,28 @@ use std::{
     thread::JoinHandle,
 };
 
+use details::Details;
 use unicode_segmentation::UnicodeSegmentation;
 use unlinka_core::{DeleteOptions, DeleteReport, PreparedTargets, Progress};
-use unlinka_i18n::Translator;
+use unlinka_i18n::{Translator, presentation};
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, WPARAM},
         UI::{
             Controls::{
-                TASKDIALOG_BUTTON, TASKDIALOG_NOTIFICATIONS, TASKDIALOGCONFIG, TDE_CONTENT,
-                TDF_ALLOW_DIALOG_CANCELLATION, TDF_CALLBACK_TIMER, TDF_SHOW_MARQUEE_PROGRESS_BAR,
-                TDF_SIZE_TO_CONTENT, TDM_CLICK_BUTTON, TDM_SET_ELEMENT_TEXT,
-                TDM_SET_PROGRESS_BAR_MARQUEE, TDN_BUTTON_CLICKED, TDN_CREATED, TDN_TIMER,
-                TaskDialogIndirect,
+                TASKDIALOG_BUTTON, TASKDIALOG_ELEMENTS, TASKDIALOG_NOTIFICATIONS, TASKDIALOGCONFIG,
+                TDE_CONTENT, TDE_MAIN_INSTRUCTION, TDF_ALLOW_DIALOG_CANCELLATION,
+                TDF_CALLBACK_TIMER, TDF_SHOW_MARQUEE_PROGRESS_BAR, TDM_CLICK_BUTTON,
+                TDM_ENABLE_BUTTON, TDM_SET_ELEMENT_TEXT, TDM_SET_PROGRESS_BAR_MARQUEE,
+                TDN_BUTTON_CLICKED, TDN_CREATED, TDN_TIMER, TaskDialogIndirect,
             },
             WindowsAndMessaging::{IDCANCEL, PostMessageW, SendMessageW},
         },
     },
     core::{HRESULT, PCWSTR},
 };
+
+const VIEW_DETAILS: i32 = 1009;
 
 pub(crate) fn wide(value: &str) -> Vec<u16> { value.encode_utf16().chain(Some(0)).collect() }
 
@@ -39,11 +44,15 @@ pub(crate) fn dialog(
     content: &str,
     labels: &[(i32, String)],
     default: i32,
-    details: Option<&str>,
+    details: Option<Details<'_>>,
 ) -> io::Result<i32> {
     let title = wide(&tr.text("app-title"));
     let instruction = wide(instruction);
     let content = wide(content);
+    let mut labels = labels.to_vec();
+    if let Some(details) = &details {
+        labels.insert(0, (VIEW_DETAILS, details.label.to_owned()));
+    }
     let strings: Vec<_> = labels.iter().map(|(_, label)| wide(label)).collect();
     let buttons: Vec<_> = labels
         .iter()
@@ -53,31 +62,73 @@ pub(crate) fn dialog(
             pszButtonText: PCWSTR(text.as_ptr()),
         })
         .collect();
-    let details = details.map(wide);
-    let show = wide(&tr.text("show-paths"));
-    let hide = wide(&tr.text("hide-paths"));
+    let has_details = details.is_some();
+    let mut state = DetailState {
+        details,
+        close: tr.text("button-close"),
+        error: None,
+    };
     let config = TASKDIALOGCONFIG {
         cbSize: u32::try_from(size_of::<TASKDIALOGCONFIG>())
             .expect("native dialog structure size fits u32"),
-        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT,
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION,
         pszWindowTitle: PCWSTR(title.as_ptr()),
         pszMainInstruction: PCWSTR(instruction.as_ptr()),
         pszContent: PCWSTR(content.as_ptr()),
         cButtons: u32::try_from(buttons.len()).map_err(io::Error::other)?,
         pButtons: buttons.as_ptr(),
         nDefaultButton: default,
-        pszExpandedInformation: details
-            .as_ref()
-            .map_or(PCWSTR::null(), |text| PCWSTR(text.as_ptr())),
-        pszCollapsedControlText: PCWSTR(show.as_ptr()),
-        pszExpandedControlText: PCWSTR(hide.as_ptr()),
+        pfCallback: has_details.then_some(details_callback),
+        lpCallbackData: (&raw mut state) as isize,
+        cxWidth: 320,
         ..Default::default()
     };
     let mut selected = 0;
     // SAFETY: The config and all referenced strings remain alive through the modal dialog.
     unsafe { TaskDialogIndirect(&raw const config, Some(&raw mut selected), None, None) }
         .map_err(error)?;
+    if let Some(error) = state.error {
+        return Err(error);
+    }
     Ok(selected)
+}
+
+struct DetailState<'a> {
+    details: Option<Details<'a>>,
+    close: String,
+    error: Option<io::Error>,
+}
+
+unsafe extern "system" fn details_callback(
+    hwnd: HWND,
+    notification: TASKDIALOG_NOTIFICATIONS,
+    button: WPARAM,
+    _: LPARAM,
+    data: isize,
+) -> HRESULT {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if notification == TDN_BUTTON_CLICKED && button.0 == VIEW_DETAILS as usize {
+            // SAFETY: data points to dialog's live UI-thread state throughout its modal call.
+            let state = unsafe { &mut *(data as *mut DetailState<'_>) };
+            if let Some(details) = &state.details {
+                if let Err(error) = details::show(hwnd, details, &state.close) {
+                    state.error = Some(error);
+                    // SAFETY: A details failure cancels confirmation rather than hiding targets.
+                    unsafe {
+                        drop(PostMessageW(
+                            Some(hwnd),
+                            TDM_CLICK_BUTTON.0 as u32,
+                            WPARAM(IDCANCEL.0 as usize),
+                            LPARAM(0),
+                        ));
+                    }
+                }
+            }
+            return HRESULT(1); // Viewing details never accepts or closes the main dialog.
+        }
+        HRESULT(0)
+    }))
+    .unwrap_or(HRESULT(1))
 }
 
 pub(crate) fn message(tr: &Translator, instruction: &str, content: &str) -> io::Result<()> {
@@ -92,28 +143,18 @@ pub(crate) fn message(tr: &Translator, instruction: &str, content: &str) -> io::
     .map(|_| ())
 }
 
-fn path_text(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    let text = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
+/// Full paths live in the viewer; summaries never grow with path length.
+fn compact(text: &str) -> String {
+    let graphemes: Vec<_> = text.graphemes(true).collect();
+    if graphemes.len() <= 64 {
+        text.to_owned()
     } else {
-        text.strip_prefix(r"\\?\").unwrap_or(&text).into()
-    };
-    let mut result = String::new();
-    let mut columns = 0;
-    for grapheme in text.graphemes(true) {
-        let width = grapheme
-            .chars()
-            .map(|ch| if ch.is_ascii() { 1 } else { 2 })
-            .sum::<usize>();
-        if columns > 0 && columns + width > 60 {
-            result.push('\n');
-            columns = 0;
-        }
-        result.push_str(grapheme);
-        columns += width;
+        format!(
+            "{}…{}",
+            graphemes[..30].concat(),
+            graphemes[graphemes.len() - 30..].concat()
+        )
     }
-    result
 }
 
 pub(crate) fn confirm(tr: &Translator, paths: &[PathBuf]) -> io::Result<bool> {
@@ -122,12 +163,14 @@ pub(crate) fn confirm(tr: &Translator, paths: &[PathBuf]) -> io::Result<bool> {
             "confirm-one",
             &[(
                 "name",
-                paths[0]
-                    .file_name()
-                    .unwrap_or(paths[0].as_os_str())
-                    .to_string_lossy()
-                    .as_ref()
-                    .into(),
+                compact(
+                    paths[0]
+                        .file_name()
+                        .unwrap_or(paths[0].as_os_str())
+                        .to_string_lossy()
+                        .as_ref(),
+                )
+                .into(),
             )],
         )
     } else {
@@ -135,18 +178,19 @@ pub(crate) fn confirm(tr: &Translator, paths: &[PathBuf]) -> io::Result<bool> {
     };
     let details = paths
         .iter()
-        .map(|path| path_text(path))
+        .map(|path| presentation::path_text(path))
         .collect::<Vec<_>>()
         .join("\n\n");
     let content = if paths.len() == 1 {
         format!(
-            "{}\n\n{}\n{}",
-            tr.text("confirm-warning"),
+            "{}\n{}",
             tr.text("location"),
-            path_text(paths[0].parent().unwrap_or(&paths[0]))
+            compact(&presentation::path_text(
+                paths[0].parent().unwrap_or(&paths[0])
+            ))
         )
     } else {
-        tr.text("confirm-warning")
+        String::new()
     };
     Ok(dialog(
         tr,
@@ -157,7 +201,11 @@ pub(crate) fn confirm(tr: &Translator, paths: &[PathBuf]) -> io::Result<bool> {
             (IDCANCEL.0, tr.text("button-cancel")),
         ],
         IDCANCEL.0,
-        Some(&details),
+        Some(Details {
+            label: &tr.text("show-paths"),
+            title: &tr.text("targets-title"),
+            text: &details,
+        }),
     )? == 1001)
 }
 
@@ -197,10 +245,7 @@ pub(crate) fn execute(tr: &Translator, targets: PreparedTargets) -> io::Result<D
     let config = TASKDIALOGCONFIG {
         cbSize: u32::try_from(size_of::<TASKDIALOGCONFIG>())
             .expect("native dialog structure size fits u32"),
-        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION
-            | TDF_CALLBACK_TIMER
-            | TDF_SHOW_MARQUEE_PROGRESS_BAR
-            | TDF_SIZE_TO_CONTENT,
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_CALLBACK_TIMER | TDF_SHOW_MARQUEE_PROGRESS_BAR,
         pszWindowTitle: PCWSTR(title.as_ptr()),
         pszMainInstruction: PCWSTR(instruction.as_ptr()),
         pszContent: PCWSTR(content.as_ptr()),
@@ -209,6 +254,7 @@ pub(crate) fn execute(tr: &Translator, targets: PreparedTargets) -> io::Result<D
         nDefaultButton: IDCANCEL.0,
         pfCallback: Some(callback),
         lpCallbackData: (&raw mut state) as isize,
+        cxWidth: 320,
         ..Default::default()
     };
     // SAFETY: The callback state and UI strings live until TaskDialogIndirect returns.
@@ -284,6 +330,7 @@ unsafe extern "system" fn callback(
                 Err(mpsc::TryRecvError::Empty) => false,
             };
             if completed {
+                cancel_enabled(hwnd, true);
                 // SAFETY: The completion report is retained; clicking Cancel now closes the dialog.
                 unsafe {
                     drop(PostMessageW(
@@ -294,27 +341,14 @@ unsafe extern "system" fn callback(
                     ));
                 }
             } else {
-                let content = if state.cancel.load(Ordering::Relaxed) {
-                    state.tr.text("progress-cancelling")
-                } else {
-                    progress_text(
-                        state.tr,
-                        *state
-                            .latest
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner),
-                    )
-                };
-                let content = wide(&content);
-                // SAFETY: TaskDialog copies the text synchronously while the buffer is alive.
-                unsafe {
-                    SendMessageW(
-                        hwnd,
-                        TDM_SET_ELEMENT_TEXT.0 as u32,
-                        Some(WPARAM(TDE_CONTENT.0 as usize)),
-                        Some(LPARAM(content.as_ptr() as isize)),
-                    );
-                }
+                let content = progress_text(
+                    state.tr,
+                    *state
+                        .latest
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                );
+                update_text(hwnd, TDE_CONTENT, &content);
             }
         } else if notification == TDN_BUTTON_CLICKED
             && button.0 == IDCANCEL.0 as usize
@@ -322,11 +356,44 @@ unsafe extern "system" fn callback(
             && !state.worker_error
         {
             state.cancel.store(true, Ordering::Relaxed);
+            update_text(
+                hwnd,
+                TDE_MAIN_INSTRUCTION,
+                &state.tr.text("progress-cancelling"),
+            );
+            cancel_enabled(hwnd, false);
             return HRESULT(1); // Keep the dialog open until all started work returns.
         }
         HRESULT(0)
     }))
     .unwrap_or(HRESULT(1))
+}
+
+fn update_text(hwnd: HWND, element: TASKDIALOG_ELEMENTS, text: &str) {
+    let text = wide(text);
+    // SAFETY: Callers use the live UI-thread task dialog; it copies text synchronously.
+    unsafe {
+        SendMessageW(
+            hwnd,
+            TDM_SET_ELEMENT_TEXT.0 as u32,
+            Some(WPARAM(
+                usize::try_from(element.0).expect("task dialog element IDs are nonnegative"),
+            )),
+            Some(LPARAM(text.as_ptr() as isize)),
+        );
+    }
+}
+
+fn cancel_enabled(hwnd: HWND, enabled: bool) {
+    // SAFETY: Callers use the live task dialog and this message carries no pointers.
+    unsafe {
+        SendMessageW(
+            hwnd,
+            TDM_ENABLE_BUTTON.0 as u32,
+            Some(WPARAM(IDCANCEL.0 as usize)),
+            Some(LPARAM(isize::from(enabled))),
+        );
+    }
 }
 
 fn progress_text(tr: &Translator, progress: Progress) -> String {
@@ -346,63 +413,77 @@ fn progress_text(tr: &Translator, progress: Progress) -> String {
 }
 
 pub(crate) fn diagnostic(tr: &Translator, error: &io::Error) -> String {
-    let code = unlinka_core::diagnostic_code(error).as_str();
-    if code == "system" {
-        format!("[{code}] {error}")
-    } else {
-        format!("[{code}] {}", tr.text(&format!("diagnostic-{code}")))
-    }
+    presentation::diagnostic(tr, unlinka_core::diagnostic_code(error).as_str(), error)
 }
 
 pub(crate) fn results(tr: &Translator, report: &DeleteReport) -> io::Result<()> {
-    let summary = tr.format(
-        "report",
-        &[
-            ("mode", tr.text("mode-delete").into()),
-            (
-                "state",
-                tr.text(if report.cancelled {
-                    "state-cancelled"
-                } else {
-                    "state-finished"
-                })
-                .into(),
-            ),
-            (
-                "seconds",
-                format!("{:.3}", report.elapsed.as_secs_f64()).into(),
-            ),
-            ("files", report.files.into()),
-            ("directories", report.directories.into()),
-            ("links", report.links.into()),
-            ("failed", report.failed.into()),
-        ],
+    let mut summary = presentation::counts(
+        tr,
+        false,
+        report.files,
+        report.directories,
+        report.links,
+        report.elapsed,
     );
+    if report.failed > 0 {
+        summary.push_str("\n\n");
+        summary.push_str(&tr.format("report-failed", &[("failed", report.failed.into())]));
+        if let Some(first) = report.failures.first() {
+            summary.push('\n');
+            summary.push_str(&tr.format(
+                "failure",
+                &[
+                    (
+                        "path",
+                        compact(&presentation::path_text(&first.path)).into(),
+                    ),
+                    ("message", compact(&diagnostic(tr, &first.error)).into()),
+                ],
+            ));
+        }
+    }
     let mut failures = report
         .failures
         .iter()
         .map(|failure| {
-            format!(
-                "{}\n{}\n{}",
-                tr.operation(failure.operation),
-                path_text(&failure.path),
-                diagnostic(tr, &failure.error)
+            tr.format(
+                "failure",
+                &[
+                    ("path", presentation::path_text(&failure.path).into()),
+                    (
+                        "message",
+                        tr.format(
+                            "failure-context",
+                            &[
+                                ("operation", tr.operation(failure.operation).into()),
+                                ("message", diagnostic(tr, &failure.error).into()),
+                            ],
+                        )
+                        .into(),
+                    ),
+                ],
             )
         })
         .collect::<Vec<_>>()
         .join("\n\n");
     let omitted = report.failed.saturating_sub(report.failures.len() as u64);
     if omitted > 0 {
-        failures.push('\n');
+        if !failures.is_empty() {
+            failures.push_str("\n\n");
+        }
         failures.push_str(&tr.count("failures-omitted", omitted));
     }
     dialog(
         tr,
-        &tr.text("results-title"),
+        &presentation::outcome(tr, false, report.cancelled, report.failed),
         &summary,
         &[(IDCANCEL.0, tr.text("button-close"))],
         IDCANCEL.0,
-        (!failures.is_empty()).then_some(failures.as_str()),
+        (!failures.is_empty()).then_some(Details {
+            label: &tr.text("show-failures"),
+            title: &tr.text("failures-title"),
+            text: &failures,
+        }),
     )
     .map(|_| ())
 }

@@ -5,6 +5,7 @@ use std::{
 
 use serde::Serialize;
 use unlinka_core::DeleteReport;
+use unlinka_i18n::{Translator, presentation};
 
 use crate::cli::ExitStatus;
 
@@ -114,6 +115,72 @@ impl ResultDocument {
             _ => ExitStatus::ExecutionFailed,
         }
     }
+}
+
+/// Keeps ordinary terminal output short; verbose mode exposes retained diagnostics.
+pub(crate) fn report_text(
+    report: &DeleteReport,
+    dry_run: bool,
+    verbose: bool,
+    tr: &Translator,
+) -> String {
+    let mut lines = vec![
+        presentation::outcome(tr, dry_run, report.cancelled, report.failed),
+        presentation::counts(
+            tr,
+            dry_run,
+            report.files,
+            report.directories,
+            report.links,
+            report.elapsed,
+        ),
+    ];
+    if dry_run {
+        lines.push(tr.text("dry-run-note"));
+    }
+    if report.failed > 0 {
+        lines.push(tr.format("report-failed", &[("failed", report.failed.into())]));
+    }
+    let limit = if verbose { report.failures.len() } else { 5 };
+    let shown = report.failures.len().min(limit);
+    for failure in report.failures.iter().take(shown) {
+        let code = unlinka_core::diagnostic_code(&failure.error).as_str();
+        let detail = tr.format(
+            "failure",
+            &[
+                ("path", presentation::path_text(&failure.path).into()),
+                (
+                    "message",
+                    presentation::diagnostic(tr, code, &failure.error).into(),
+                ),
+            ],
+        );
+        lines.push(format!("  {}", detail.replace('\n', "\n    ")));
+        if verbose {
+            let mut technical = tr.format(
+                "failure-technical",
+                &[
+                    ("operation", tr.operation(failure.operation).into()),
+                    ("code", code.into()),
+                ],
+            );
+            if let Some(code) = failure.error.raw_os_error() {
+                technical.push_str(" · ");
+                technical.push_str(&tr.format("failure-os-code", &[("code", code.into())]));
+            }
+            lines.push(format!("    {technical}"));
+        }
+    }
+    let available = report.failed.min(report.failures.len() as u64);
+    let hidden = available.saturating_sub(shown as u64);
+    if hidden > 0 {
+        lines.push(tr.count("failures-more", hidden));
+    }
+    let omitted = report.failed.saturating_sub(report.failures.len() as u64);
+    if omitted > 0 {
+        lines.push(tr.count("failures-omitted", omitted));
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]

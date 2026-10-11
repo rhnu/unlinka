@@ -55,19 +55,19 @@ fn embedded_messages_parse_and_pluralize() {
 #[test]
 fn report_plural_selection_uses_numeric_arguments() {
     let translator = Translator::new(Locale::EnUs);
-    let text = translator.format(
-        "report",
-        &[
-            ("mode", "Deletion".into()),
-            ("state", "finished".into()),
-            ("seconds", "0.001".into()),
-            ("files", 1u64.into()),
-            ("directories", 2u64.into()),
-            ("links", 0u64.into()),
-            ("failed", 1u64.into()),
-        ],
+    let text = presentation::counts(
+        &translator,
+        false,
+        1,
+        2,
+        0,
+        std::time::Duration::from_millis(1),
     );
     assert!(text.contains("1 file,"));
     assert!(text.contains("2 directories,"));
-    assert!(text.contains("1 failure."));
+    assert!(
+        translator
+            .format("report-failed", &[("failed", 1u64.into())])
+            .contains("1 failure")
+    );
 }

@@ -64,6 +64,7 @@ fn cli(fixture: &Fixture, options: &[&str], targets: &[PathBuf], cwd: &Path, exi
         fs::copy(env!("CARGO_BIN_EXE_unlinka"), &copy).expect("copy executable inside fixture");
     }
     let mut args: Vec<OsString> = options.iter().map(OsString::from).collect();
+    args.push("--json".into());
     args.push("--".into());
     args.extend(targets.iter().map(|path| path.as_os_str().to_owned()));
     let output = run(&copy, &args, cwd).expect("run validation executable within timeout");
@@ -426,12 +427,9 @@ fn failure_total_and_first_hundred() {
                     failed: 151
                 }
             );
-            assert_eq!(
-                text.lines()
-                    .filter(|line| line.starts_with("error: "))
-                    .count(),
-                100
-            );
+            let json = text.lines().find(|line| line.starts_with('{')).unwrap();
+            let document: serde_json::Value = serde_json::from_str(json).unwrap();
+            assert_eq!(document["diagnostics"].as_array().unwrap().len(), 100);
             assert!(text.contains("51 additional failures omitted"));
         } else {
             let report = engine(std::slice::from_ref(&target), 8, false);

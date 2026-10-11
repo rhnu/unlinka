@@ -277,34 +277,31 @@ pub struct Counts {
     pub failed: u64,
 }
 
-/// Read the public CLI summary, without depending on timing or path text.
+/// Reads the versioned JSON result without depending on human-facing wording.
 ///
 /// # Errors
-/// Returns an error if the CLI summary is missing or does not contain four counts.
+/// Returns an error for a missing or unsupported JSON result or invalid count fields.
 pub fn counts(text: &str) -> io::Result<Counts> {
     let line = text
         .lines()
-        .find(|line| {
-            let line = line.to_ascii_lowercase();
-            line.starts_with("deletion ")
-                || line.starts_with("dry-run scan ")
-                || line.starts_with("scan ")
-        })
-        .ok_or_else(|| io::Error::other("CLI summary missing"))?;
-    let (_, counts) = line
-        .split_once(": ")
-        .ok_or_else(|| io::Error::other("malformed summary"))?;
-    let numbers: Vec<u64> = counts
-        .split_whitespace()
-        .filter_map(|word| word.parse().ok())
-        .collect();
-    if numbers.len() != 4 {
-        return Err(io::Error::other("malformed CLI counts"));
+        .find(|line| line.starts_with('{'))
+        .ok_or_else(|| io::Error::other("CLI JSON result missing"))?;
+    let document: serde_json::Value = serde_json::from_str(line).map_err(io::Error::other)?;
+    if document["schema_version"].as_u64() != Some(1) {
+        return Err(io::Error::other("unsupported CLI result schema"));
     }
+    let count = |name| {
+        document[name]
+            .as_u64()
+            .ok_or_else(|| io::Error::other(format!("invalid CLI count: {name}")))
+    };
     Ok(Counts {
-        files: numbers[0],
-        directories: numbers[1],
-        links: numbers[2],
-        failed: numbers[3],
+        files: count("files")?,
+        directories: count("directories")?,
+        links: count("links")?,
+        failed: count("failed")?,
     })
 }
+
+#[cfg(test)]
+mod tests;

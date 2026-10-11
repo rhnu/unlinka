@@ -8,7 +8,7 @@ The workspace contains the current-user installer pipeline, classic/modern COM a
 
 Payload schema 1 records a `signed` boolean. Signed payloads require signature validation; both modes retain SHA-256 checks, request ACLs, installation leases, ownership checks, and transaction recovery. Unsigned payloads contain neither an MSIX nor an embedded desktop package identity. Output paths and Setup names are identical across signing modes, and existing package versions cannot be overwritten.
 
-Current source validation passed: workspace/all-target compilation, Rusteward formatting and strict lint, and all 74 pure unit tests. Signed-metadata compilation of desktop and maintenance packages also passed without using a certificate. The additional unit tests cover retained menu preferences, durable uninstall purge choices, legacy transaction metadata, rejected PATH intents, and packaging compiler-flag precedence.
+Current source validation passed: workspace/all-target compilation, Rusteward formatting and strict lint, and all 82 pure unit tests. Tests cover retained menu preferences, durable uninstall purge choices, legacy transaction metadata, rejected PATH intents, packaging compiler-flag precedence, concise report boundaries, outcome precedence, localized Windows errors, and JSON-based validation counts. Signed-metadata compilation of desktop and maintenance packages previously passed without using a certificate; that configuration was not rerun for the presentation adjustment.
 
 The default unsigned release installer was built as `target/packages/0.1.0.8/Unlinka-Setup-0.1.0.8-x64.exe` (3,454,089 bytes; SHA-256 `ddd3cc8aaa3dceed91276e498376be3c09b659a907fc158cabbbb6bfe01326e4`). All 71 payload inventory hashes matched; metadata records `signed: false`, and no MSIX was generated. SDK `mt.exe` extraction confirmed all four executable manifests contain Common Controls v6 and version `0.1.0.8`, without MSIX identity. PE import inspection confirmed all five product EXE/DLL files have no dynamic VC/UCRT dependency. The packaged maintenance executable's help and CLI's Chinese help started successfully without installing the product.
 
@@ -29,6 +29,8 @@ Use disposable Windows test environments for the unified installation identity:
 ## CLI confirmation
 
 CLI deletion uses terminal confirmation; native confirmation, progress, and result dialogs belong to Explorer Shell tasks. `--yes` / `-y` skips confirmation, and `--dry-run` scans without confirmation or deletion. Pure unit tests cover affirmative and negative answers, empty answers, EOF, output failure, complete local/UNC path display, and both yes switches.
+
+Current presentation uses concise permanent-deletion prompts, explicit complete/incomplete/cancelled outcomes, localized common Windows errors, and a 5-failure terminal preview with `-v` for retained details. Native targets and failures use a fixed-size scrollable text viewer. The terminal checks below predate this presentation adjustment; the new viewer's layout, copy behavior, focus return, and DPI behavior still require manual Windows acceptance.
 
 Real Windows terminal validation passed using the rebuilt debug CLI in an interactive pseudoterminal, with one fresh disposable file per case:
 
@@ -88,6 +90,9 @@ The benchmark builds a release binary unless `--binary <path>` selects one. Base
 For manual native-dialog validation, check that:
 
 - Default Enter, Escape, and closing the window preserve the targets.
-- Expanded paths are complete, including long paths, combining characters, and joined emoji.
+- View targets opens a bounded scrollable window with complete paths, including long paths, combining characters, and joined emoji; copying does not add hard-wrapped line breaks.
+- Closing details with Enter, Escape, or the window close control returns to the unchanged confirmation dialog without deleting anything.
+- Failure totals and the first path/reason remain visible; View failure details shows retained paths/reasons and the omitted count without expanding the result dialog.
+- Cancellation keeps progress counts visible and closes after active operations return; check both languages and 100% / 150% / 200% display scaling.
 - Delete removes the selected targets.
 - Replacing a target while the dialog is open rejects execution and preserves both objects.

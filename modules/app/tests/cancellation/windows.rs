@@ -73,7 +73,7 @@ fn cancellation_case(
     let mut observed = false;
     while ready.elapsed() < Duration::from_secs(10) && child.running()? {
         let text = fs::read_to_string(&error_file)?;
-        if text.contains("Starting deletion")
+        if text.contains("Starting permanent deletion")
             && (0..64).any(|i| !target.join(format!("file-{i:05}.txt")).exists())
         {
             observed = true;
@@ -109,7 +109,8 @@ fn cancellation_case(
     }
     let exit = child.exit_code()?;
     let text = fs::read_to_string(&error_file)?;
-    let report = counts(&text)?;
+    let json = fs::read_to_string(case.join("stdout.txt"))?;
+    let report = counts(&json)?;
     let remaining = if target.exists() {
         fs::read_dir(&target)?
             .collect::<io::Result<Vec<_>>>()?
@@ -219,7 +220,7 @@ impl Child {
         // Windows paths cannot contain quotes; arguments end in .exe/target,
         // so quoted path arguments have no trailing backslash ambiguity.
         let mut command: Vec<_> = format!(
-            "\"{}\" --lang en-US -r -y --threads {threads} -- \"{}\"",
+            "\"{}\" --lang en-US -r -y --json --threads {threads} -- \"{}\"",
             binary.display(),
             target.display()
         )

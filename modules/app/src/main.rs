@@ -16,8 +16,8 @@ use clap::{
     FromArgMatches,
     error::{ContextKind, ErrorKind},
 };
-use unlinka_core::{DeleteOptions, DeleteReport, PreparedTargets, execute, prepare};
-use unlinka_i18n::{FluentValue, Translator, select_locale, windows_languages};
+use unlinka_core::{DeleteOptions, PreparedTargets, execute, prepare};
+use unlinka_i18n::{FluentValue, Translator, presentation, select_locale, windows_languages};
 use unlinka_integration::{AppLease, read_settings};
 
 use crate::{
@@ -170,10 +170,7 @@ fn run(cli: &Cli, tr: &Translator) -> ResultDocument {
     let cancelled = Arc::new(AtomicBool::new(false));
     let signal = Arc::clone(&cancelled);
     if let Err(error) = ctrlc::set_handler(move || signal.store(true, Ordering::Relaxed)) {
-        eprintln!(
-            "[cancellation_handler_failed] {}: {error}",
-            tr.text("error-interrupt")
-        );
+        eprintln!("{} {error}", tr.text("error-interrupt"));
         let mut document =
             ResultDocument::new(ExitStatus::ExecutionFailed, cli.dry_run, &cli.paths);
         document.diagnostic(
@@ -195,7 +192,7 @@ fn run(cli: &Cli, tr: &Translator) -> ResultDocument {
             }
             eprintln!("{}", tr.text("supplied-paths"));
             for path in &cli.paths {
-                eprintln!("  {}", path.display());
+                eprintln!("  {}", presentation::path_text(path));
             }
             return failed(
                 cli,
@@ -226,29 +223,26 @@ fn execute_prepared(
     if cli.dry_run {
         eprintln!("{}", tr.text("dry-run"));
         for path in targets.paths() {
-            eprintln!("  {}", path.display());
+            eprintln!("  {}", presentation::path_text(path));
         }
-    } else {
-        eprintln!("{}", tr.text("permanent-warning"));
-        if !cli.yes {
-            match confirm::console(targets.paths(), tr) {
-                Ok(true) => {},
-                Ok(false) => return cancelled_before_execution(cli, tr),
-                Err(error) => {
-                    if cancelled.load(Ordering::Relaxed) {
-                        return cancelled_before_execution(cli, tr);
-                    }
-                    return failed(
-                        cli,
-                        tr,
-                        ExitStatus::ConfirmationFailed,
-                        "confirmation_failed",
-                        "error-confirm",
-                        "confirm",
-                        &error,
-                    );
-                },
-            }
+    } else if !cli.yes {
+        match confirm::console(targets.paths(), tr) {
+            Ok(true) => {},
+            Ok(false) => return cancelled_before_execution(cli, tr),
+            Err(error) => {
+                if cancelled.load(Ordering::Relaxed) {
+                    return cancelled_before_execution(cli, tr);
+                }
+                return failed(
+                    cli,
+                    tr,
+                    ExitStatus::ConfirmationFailed,
+                    "confirmation_failed",
+                    "error-confirm",
+                    "confirm",
+                    &error,
+                );
+            },
         }
     }
     if cancelled.load(Ordering::Relaxed) {
@@ -268,11 +262,16 @@ fn execute_prepared(
                     })
                     .into()
                 ),
-                ("count", FluentValue::from(targets.paths().len())),
-                ("threads", FluentValue::from(cli.threads))
+                ("count", FluentValue::from(targets.paths().len()))
             ]
         )
     );
+    if cli.verbose > 0 {
+        eprintln!(
+            "{}",
+            tr.format("thread-budget", &[("threads", cli.threads.into())])
+        );
+    }
     let report = execute(
         targets,
         &DeleteOptions {
@@ -282,7 +281,10 @@ fn execute_prepared(
         },
         cancelled,
     );
-    print_report(&report, cli.dry_run, tr);
+    eprintln!(
+        "{}",
+        result::report_text(&report, cli.dry_run, cli.verbose > 0, tr)
+    );
     ResultDocument::from_report(
         &report,
         cli.dry_run,
@@ -300,20 +302,15 @@ fn failed(
     operation: &str,
     error: &std::io::Error,
 ) -> ResultDocument {
-    let detail = core_error(tr, error);
-    eprintln!("[{code}] {}: {detail}", tr.text(message));
+    let detail = presentation::diagnostic(tr, unlinka_core::diagnostic_code(error).as_str(), error);
+    if cli.verbose > 0 {
+        eprintln!("[{code}] {}: {detail}", tr.text(message));
+    } else {
+        eprintln!("{} {detail}", tr.text(message));
+    }
     let mut document = ResultDocument::new(status, cli.dry_run, &cli.paths);
     document.diagnostic(code, operation, None, error.raw_os_error());
     document
-}
-
-fn core_error(tr: &Translator, error: &std::io::Error) -> String {
-    let code = unlinka_core::diagnostic_code(error).as_str();
-    if code == "system" {
-        error.to_string()
-    } else {
-        tr.text(&format!("diagnostic-{code}"))
-    }
 }
 
 fn cancelled_before_execution(cli: &Cli, tr: &Translator) -> ResultDocument {
@@ -321,58 +318,4 @@ fn cancelled_before_execution(cli: &Cli, tr: &Translator) -> ResultDocument {
     let mut document = ResultDocument::new(ExitStatus::Cancelled, cli.dry_run, &cli.paths);
     document.diagnostic("cancelled", "confirm", None, None);
     document
-}
-
-fn print_report(report: &DeleteReport, dry_run: bool, tr: &Translator) {
-    eprintln!(
-        "{}",
-        tr.format(
-            "report",
-            &[
-                (
-                    "mode",
-                    tr.text(if dry_run { "mode-scan" } else { "mode-delete" })
-                        .into()
-                ),
-                (
-                    "state",
-                    tr.text(if report.cancelled {
-                        "state-cancelled"
-                    } else {
-                        "state-finished"
-                    })
-                    .into()
-                ),
-                (
-                    "seconds",
-                    format!("{:.3}", report.elapsed.as_secs_f64()).into()
-                ),
-                ("files", report.files.into()),
-                ("directories", report.directories.into()),
-                ("links", report.links.into()),
-                ("failed", report.failed.into())
-            ]
-        )
-    );
-    if dry_run {
-        eprintln!("{}", tr.text("dry-run-note"));
-    }
-    for failure in &report.failures {
-        eprintln!(
-            "[{}] {}",
-            unlinka_core::diagnostic_code(&failure.error).as_str(),
-            tr.format(
-                "failure",
-                &[
-                    ("operation", tr.operation(failure.operation).into()),
-                    ("path", failure.path.to_string_lossy().as_ref().into()),
-                    ("message", core_error(tr, &failure.error).into())
-                ]
-            )
-        );
-    }
-    let omitted = report.failed.saturating_sub(report.failures.len() as u64);
-    if omitted > 0 {
-        eprintln!("{}", tr.count("failures-omitted", omitted));
-    }
 }

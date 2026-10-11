@@ -1,4 +1,6 @@
 //! Embedded product translations and deterministic language negotiation.
+pub mod presentation;
+
 pub use fluent_bundle::FluentValue;
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 

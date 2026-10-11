@@ -816,7 +816,7 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unlinka"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "ctrlc",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "unlinka-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossbeam-channel",
  "windows-sys",
@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "unlinka-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unicode-segmentation",
  "unlinka-core",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "unlinka-i18n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fluent-bundle",
  "unic-langid",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "unlinka-integration"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "serde",
@@ -871,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "unlinka-launcher"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unlinka-i18n",
  "unlinka-integration",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "unlinka-shell"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "unlinka-i18n",
  "unlinka-integration",
@@ -890,8 +890,9 @@ dependencies = [
 
 [[package]]
 name = "unlinka-validation"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "serde_json",
  "windows-sys",
 ]
 
@@ -1041,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "ico",

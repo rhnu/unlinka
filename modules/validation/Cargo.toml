@@ -5,5 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[dependencies]
+serde_json.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

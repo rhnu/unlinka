@@ -1,9 +1,9 @@
 use std::{
     io::{self, BufRead, IsTerminal, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
-use unlinka_i18n::Translator;
+use unlinka_i18n::{Translator, presentation::path_text};
 
 /// Requires an interactive terminal and accepts only an explicit affirmative.
 pub fn console(paths: &[PathBuf], tr: &Translator) -> io::Result<bool> {
@@ -22,13 +22,9 @@ fn prompt(
 ) -> io::Result<bool> {
     writeln!(output, "{}", tr.text("confirm-console"))?;
     for path in paths {
-        writeln!(output, "  {}", display_path(path))?;
+        writeln!(output, "  {}", path_text(path))?;
     }
-    write!(
-        output,
-        "{} ",
-        tr.count("confirm-prompt", paths.len() as u64)
-    )?;
+    write!(output, "{} ", tr.text("confirm-prompt"))?;
     output.flush()?;
     let mut answer = String::new();
     if input.read_line(&mut answer)? == 0 {
@@ -41,16 +37,6 @@ fn prompt(
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
-}
-
-/// Keeps extended Win32 paths readable without altering the actual target.
-fn display_path(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else {
-        text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
-    }
 }
 
 #[cfg(test)]
