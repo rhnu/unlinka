@@ -33,11 +33,8 @@ unlinka --lang zh-CN --help
 # Query installation health without starting deletion
 unlinka --integration-status --json
 
-# Show the native Windows confirmation dialog; Cancel is the default button
+# Confirm interactively in the terminal; an empty answer cancels
 unlinka -r .\node_modules
-
-# Confirm in an interactive terminal
-unlinka -r --confirm console .\node_modules
 
 # Explicitly skip confirmation in a script
 unlinka -r --yes .\node_modules
@@ -57,7 +54,7 @@ unlinka -- -example
 
 Ordinary directories require `-r`. Symbolic links, junctions, and other reparse points are treated as entries; their destinations are never recursively scanned. `--threads` accepts 1–64 and defaults to the smaller of the available CPU thread count and 4. A budget of 1 runs synchronously; larger budgets allocate one scanner thread and the remaining threads to deletion. Discovered files can be deleted while scanning continues, without waiting for a complete tree count.
 
-If native confirmation fails, Unlinka reports an error. Select `--confirm console` explicitly to use terminal confirmation. Console mode requires interactive stdin and stderr, and an empty answer rejects deletion. `--yes` cannot be combined with an explicit `--confirm`.
+CLI deletion always uses terminal confirmation and requires interactive stdin and stderr. Only `y` or `yes` confirms deletion (case-insensitive); an empty answer cancels. Use `--yes` / `-y` to skip confirmation in scripts, or `--dry-run` to scan without deleting. Native confirmation, progress, and result dialogs are used for Explorer Shell actions.
 
 Results and diagnostics go to stderr. Normal runs count successfully deleted files, directories, and link entries; dry runs count candidates discovered during scanning. The summary reports elapsed time and the total number of failures, with details for at most 100 failures. Press Ctrl+C to cancel execution; items already deleted cannot be recovered by Unlinka.
 

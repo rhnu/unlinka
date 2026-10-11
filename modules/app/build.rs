@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf};
 
-/// Embeds Common Controls v6 so `TaskDialogIndirect` uses the native Windows UI.
+/// Embeds the CLI's Windows manifest and optional packaged resources.
 fn main() {
     println!("cargo:rerun-if-env-changed=UNLINKA_WINDOWS_RESOURCE");
     println!("cargo:rerun-if-env-changed=UNLINKA_PACKAGE_VERSION");

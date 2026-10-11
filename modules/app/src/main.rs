@@ -21,7 +21,7 @@ use unlinka_i18n::{FluentValue, Translator, select_locale, windows_languages};
 use unlinka_integration::{AppLease, read_settings};
 
 use crate::{
-    cli::{Cli, Confirmation, ExitStatus},
+    cli::{Cli, ExitStatus},
     result::ResultDocument,
 };
 
@@ -231,11 +231,7 @@ fn execute_prepared(
     } else {
         eprintln!("{}", tr.text("permanent-warning"));
         if !cli.yes {
-            let confirmation = match cli.confirmation() {
-                Confirmation::Native => confirm::native(targets.paths(), tr),
-                Confirmation::Console => confirm::console(targets.paths(), tr),
-            };
-            match confirmation {
+            match confirm::console(targets.paths(), tr) {
                 Ok(true) => {},
                 Ok(false) => return cancelled_before_execution(cli, tr),
                 Err(error) => {

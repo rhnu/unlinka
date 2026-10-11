@@ -89,7 +89,7 @@ fn query_command() -> Command {
                 .long("integration-status")
                 .action(ArgAction::SetTrue)
                 .required(true)
-                .conflicts_with_all(["paths", "recursive", "confirm", "yes", "dry_run", "threads"]),
+                .conflicts_with_all(["paths", "recursive", "yes", "dry_run", "threads"]),
         )
         .arg(Arg::new("json").long("json").action(ArgAction::SetTrue))
         .arg(
@@ -109,11 +109,6 @@ fn query_command() -> Command {
                 .short('r')
                 .long("recursive")
                 .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("confirm")
-                .long("confirm")
-                .value_parser(["native", "console"]),
         )
         .arg(
             Arg::new("yes")

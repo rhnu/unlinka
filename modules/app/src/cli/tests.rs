@@ -1,6 +1,6 @@
 use clap::{Parser, error::ErrorKind};
 
-use super::{Cli, Confirmation, ExitStatus};
+use super::{Cli, ExitStatus};
 
 #[test]
 fn requires_at_least_one_path() {
@@ -18,37 +18,23 @@ fn accepts_multiple_paths_and_recursive_deletion() {
     );
     assert!(cli.recursive);
     assert_eq!(cli.verbose, 1);
-    assert_eq!(cli.confirmation(), Confirmation::Native);
+    assert!(!cli.yes);
 }
 
 #[test]
-fn yes_works_without_an_explicit_confirmation_option() {
-    let cli = Cli::try_parse_from(["unlinka", "-y", "file"])
-        .expect("yes without an explicit confirmation mode is valid");
-    assert!(cli.yes);
-}
-
-#[test]
-fn yes_conflicts_with_every_explicit_confirmation_mode() {
-    for mode in ["native", "console"] {
-        let error = Cli::try_parse_from(["unlinka", "--yes", "--confirm", mode, "file"])
-            .expect_err("yes conflicts with an explicit confirmation mode");
-        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+fn accepts_short_and_long_yes_options() {
+    for option in ["-y", "--yes"] {
+        let cli = Cli::try_parse_from(["unlinka", option, "file"])
+            .expect("yes skips terminal confirmation");
+        assert!(cli.yes);
     }
 }
 
 #[test]
-fn rejects_unknown_confirmation_modes() {
-    let error = Cli::try_parse_from(["unlinka", "--confirm", "other", "file"])
-        .expect_err("unknown confirmation modes are invalid");
-    assert_eq!(error.kind(), ErrorKind::InvalidValue);
-}
-
-#[test]
-fn accepts_console_and_dry_run() {
-    let cli = Cli::try_parse_from(["unlinka", "--confirm", "console", "--dry-run", "file"])
-        .expect("dry-run accepts the console mode without opening confirmation");
-    assert_eq!(cli.confirmation(), Confirmation::Console);
+fn accepts_dry_run_without_yes() {
+    let cli = Cli::try_parse_from(["unlinka", "--dry-run", "file"])
+        .expect("dry-run needs no confirmation override");
+    assert!(!cli.yes);
     assert!(cli.dry_run);
 }
 

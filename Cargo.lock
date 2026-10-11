@@ -822,7 +822,6 @@ dependencies = [
  "ctrlc",
  "serde",
  "serde_json",
- "unicode-segmentation",
  "unlinka-core",
  "unlinka-i18n",
  "unlinka-integration",

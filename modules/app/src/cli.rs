@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser};
 use unlinka_i18n::Translator;
 
 /// Command-line choices for permanent deletion and its confirmation boundary.
@@ -13,7 +13,7 @@ use unlinka_i18n::Translator;
     name = "unlinka",
     version,
     about = "Permanently delete Windows files and directories",
-    long_about = "Permanently delete Windows files and directories. Deleted items do not enter the Recycle Bin. Directory contents require --recursive. Reparse points are removed as links without following their targets."
+    long_about = "Permanently delete Windows files and directories. Deleted items do not enter the Recycle Bin. Directory contents require --recursive. Reparse points are removed as links without following their targets. Confirm interactively in the terminal, or use --yes (-y) to skip confirmation."
 )]
 pub(crate) struct Cli {
     /// Files, directories, or links to delete; use -- before paths beginning with -.
@@ -23,10 +23,6 @@ pub(crate) struct Cli {
     /// Delete directory contents recursively.
     #[arg(short = 'r', long)]
     pub(crate) recursive: bool,
-
-    /// Confirmation interface (default: native).
-    #[arg(long, value_enum, conflicts_with = "yes")]
-    pub(crate) confirm: Option<Confirmation>,
 
     /// Skip confirmation and permanently delete the selected targets.
     #[arg(short = 'y', long)]
@@ -50,7 +46,7 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) json: bool,
 
-    #[arg(long, conflicts_with_all = ["paths", "recursive", "confirm", "yes", "dry_run", "threads"])]
+    #[arg(long, conflicts_with_all = ["paths", "recursive", "yes", "dry_run", "threads"])]
     pub(crate) integration_status: bool,
 }
 
@@ -67,7 +63,6 @@ pub(crate) fn command(translator: &Translator) -> clap::Command {
     for (argument, message) in [
         ("paths", "help-paths"),
         ("recursive", "help-recursive"),
-        ("confirm", "help-confirm"),
         ("yes", "help-yes"),
         ("dry_run", "help-dry-run"),
         ("threads", "help-threads"),
@@ -120,18 +115,6 @@ pub(crate) fn bootstrap(arguments: &[std::ffi::OsString]) -> (Option<String>, bo
         }
     }
     (language, json)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(crate) enum Confirmation {
-    Native,
-    Console,
-}
-
-impl Cli {
-    pub(crate) fn confirmation(&self) -> Confirmation {
-        self.confirm.unwrap_or(Confirmation::Native)
-    }
 }
 
 /// Stable process exit codes for scripts and interactive callers.

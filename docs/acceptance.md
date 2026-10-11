@@ -8,11 +8,11 @@ The workspace contains the current-user installer pipeline, classic/modern COM a
 
 Payload schema 1 records a `signed` boolean. Signed payloads require signature validation; both modes retain SHA-256 checks, request ACLs, installation leases, ownership checks, and transaction recovery. Unsigned payloads contain neither an MSIX nor an embedded desktop package identity. Output paths and Setup names are identical across signing modes, and existing package versions cannot be overwritten.
 
-Source validation passed: workspace/all-target compilation in both unsigned and signed-metadata configurations, Rusteward formatting and strict lint, and all 66 pure unit tests. The signed-metadata check compiled the package-identity branch without using a certificate.
+Current source validation passed: workspace/all-target compilation, Rusteward formatting and strict lint, and all 65 pure unit tests. Earlier unsigned and signed-metadata compilation checks also passed; the signed-metadata check compiled the package-identity branch without using a certificate.
 
 The default unsigned release installer was built as `target/packages/0.1.0.6/Unlinka-Setup-0.1.0.6-x64.exe` (3,351,234 bytes; SHA-256 `3740ef5f2cfac235e17eca9ed13e809a27ebe9e591f4bd8fa0d13bc332871557`). All 71 payload inventory hashes matched. Metadata records `signed: false` and an empty Publisher; no MSIX was generated. The five application binaries and Setup report `NotSigned` and product version `0.1.0.6`. Extraction of the desktop executable's embedded manifest confirmed no MSIX identity and retained Common Controls. The packaged CLI's Chinese help also ran successfully.
 
-Certificate-backed signing has not been exercised with a certificate. No product installer, package registration, Explorer action, native UI, actual deletion, or benchmark was executed for these changes. The existing CI deletion test definitions remain opt-in locally and use deterministic English or stable JSON output.
+Certificate-backed signing has not been exercised with a certificate. No product installer, package registration, Explorer action, native UI, or benchmark was executed for the installer changes. CLI deletion checks for the current confirmation behavior are recorded below. The existing CI deletion test definitions remain opt-in locally and use deterministic English or stable JSON output.
 
 Real Win10/Win11 menu behavior, package identity/deployment, installer selections, settings dialogs, busy-task maintenance, cross-version rollback, crash recovery, and occupied-DLL uninstall retry still require Windows acceptance. Do not infer these results from pure unit tests or the historical deletion results below. Rust 1.85 has not been validated locally.
 
@@ -23,6 +23,26 @@ Use disposable Windows test environments for the unified installation identity:
 - Test mixed selections, raw UTF-16/long paths, shortcuts, and reparse points; test both languages, default cancellation, progress cancellation, changed targets, and partial failures using disposable fixtures.
 - Exercise retained settings, same-version repair, cross-version upgrades in both signing directions, package failure rollback, interrupted maintenance, external PATH/registry changes, and preserved unknown files.
 - Cancel both uninstall confirmations before cleanup; retain the uninstall entry on pending removal, release occupied DLLs, and retry successfully.
+
+## CLI confirmation
+
+CLI deletion uses terminal confirmation; native confirmation, progress, and result dialogs belong to Explorer Shell tasks. `--yes` / `-y` skips confirmation, and `--dry-run` scans without confirmation or deletion. Pure unit tests cover affirmative and negative answers, empty answers, EOF, output failure, complete local/UNC path display, and both yes switches.
+
+Real Windows terminal validation passed using the rebuilt debug CLI in an interactive pseudoterminal, with one fresh disposable file per case:
+
+| Case                   | Exit code | File state and terminal behavior                                     |
+| ---------------------- | --------- | -------------------------------------------------------------------- |
+| Press Enter at `[y/N]` | 3         | Target retained with its original content; cancellation reported     |
+| Answer `y`             | 0         | Target deleted; summary reported one file and zero failures          |
+| Answer `yes`           | 0         | Target deleted; summary reported one file and zero failures          |
+| Pass `--yes`           | 0         | Target deleted without a prompt; one file and zero failures reported |
+| Pass `-y`              | 0         | Target deleted without a prompt; one file and zero failures reported |
+
+An outside-target sentinel retained its original content throughout, and the owned temporary directory was removed after validation. Explorer interactions were not exercised for this adjustment. Remaining checks with disposable targets:
+
+- Answer `n` at the terminal prompt and verify that the targets remain.
+- Redirect stdin or stderr without a skip option and verify confirmation error status 4 with targets preserved; verify `--dry-run` preserves them without confirmation.
+- Use the Explorer context menu and check native confirmation, progress, cancellation, and results.
 
 ## Historical deletion-engine results
 

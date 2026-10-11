@@ -33,11 +33,8 @@ unlinka --lang zh-CN --help
 # 查询安装状态，不开始删除
 unlinka --integration-status --json
 
-# 弹出 Windows 原生确认窗口；取消为默认按钮
+# 在终端中交互确认；空回答取消删除
 unlinka -r .\node_modules
-
-# 在交互式终端中确认
-unlinka -r --confirm console .\node_modules
 
 # 在脚本中明确跳过确认
 unlinka -r --yes .\node_modules
@@ -57,7 +54,7 @@ unlinka -- -example
 
 普通目录必须显式使用 `-r`。符号链接、junction 和其他重解析点作为入口处理，不递归扫描其目标。`--threads` 范围为 1–64，默认取 CPU 可用线程数与 4 的较小值。预算为 1 时同步执行；更大的预算分配一个扫描线程，其余线程执行删除。扫描时就可以删除已发现的文件，不等待整棵目录树统计完毕。
 
-原生确认失败时，Unlinka 会报告错误。需要终端确认时显式使用 `--confirm console`。终端模式要求交互式 stdin 和 stderr，空回答拒绝删除。`--yes` 与显式 `--confirm` 不能同时使用。
+CLI 删除始终使用终端确认，要求交互式 stdin 和 stderr。只有输入 `y` 或 `yes` 才确认删除（不区分大小写），空回答取消。脚本可用 `--yes` / `-y` 跳过确认，或用 `--dry-run` 仅扫描。原生确认、进度和结果窗口用于 Explorer Shell 操作。
 
 结果与诊断输出至 stderr。普通执行计数为成功删除的文件、目录和链接入口；dry-run 计数为扫描到的候选项。汇总给出耗时和失败总数，最多列出 100 个具体失败。执行时可以按 Ctrl+C 取消，Unlinka 不能恢复已经删除的项目。
 

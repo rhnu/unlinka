@@ -10,7 +10,7 @@ Unlinka is a Windows-only Rust workspace with a CLI, an independent deletion eng
 | ------------------------- | --------------------------------------------------------------------------------------------- |
 | `modules/app` / `cli`     | Arguments, thread budget, and exit status                                                     |
 | `modules/app` / `main`    | Preflight → confirmation → execution → summary, plus cancellation                             |
-| `modules/app` / `confirm` | Native TaskDialog and console confirmation                                                    |
+| `modules/app` / `confirm` | Interactive terminal confirmation                                                             |
 | `modules/app` / `result`  | Versioned JSON results, stable diagnostics, and raw UTF-16 paths                              |
 | `modules/core` / `paths`  | Path resolution, input protection, target identity, and duplicate / overlap normalization     |
 | `modules/core` / `engine` | Bounded scheduling, scanning, deletion, directory completion, and summaries                   |
@@ -43,11 +43,13 @@ Leaf handles allow delete sharing for hard links. Deletion stays bound to the op
 
 Deletion uses `SetFileInformationByHandle(FileDispositionInfoEx)` with POSIX semantics, falling back to ordinary handle-based deletion when unsupported. Permission and sharing failures are reported; read-only attributes are preserved. Successful entry deletion does not guarantee immediate handle invalidation or disk-space reclamation. See Microsoft's [deletion API](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle) and [sharing rules](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
 
-## Native confirmation
+## Confirmation and native Shell tasks
+
+CLI deletion confirms in the terminal using interactive stdin and stderr. The prompt lists all prepared top-level targets, flushes stderr before reading, and accepts only `y` or `yes` (case-insensitive, with surrounding whitespace ignored). Empty or other answers cancel; EOF and I/O failures return confirmation error status 4. `--yes` / `-y` bypasses confirmation, and `--dry-run` scans without confirming or deleting. Native UI is confined to the desktop/Shell path; the CLI has no confirmation-interface selector or task-dialog dependency.
 
 `TaskDialogIndirect` shows a warning, Delete, and Cancel. Cancel is the default; Escape and window close also cancel. Single targets show name and location, multiple targets show the top-level count, and expanded details show full paths. Content sizing and grapheme-based wrapping preserve long paths, combining characters, and joined emoji. Execution uses the original paths. The dialog explains permanent deletion and cancellation limits.
 
-`build.rs` embeds a Common Controls v6 manifest with current-user privileges, long-path support, and DPI awareness. Dialog failure returns a confirmation error; console confirmation requires explicit selection. See Microsoft's [task dialog documentation](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-taskdialogindirect).
+The desktop `build.rs` embeds a Common Controls v6 manifest with current-user privileges, long-path support, and DPI awareness. The CLI retains its application manifest and packaged resources without the Common Controls dependency. Shell dialog failure returns a confirmation error. See Microsoft's [task dialog documentation](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-taskdialogindirect).
 
 The desktop process uses separate confirmation, execution, and result TaskDialogs. Execution displays activity and counts without an exact percentage; Cancel, Escape, and window close request cancellation and wait for active operations. Settings stage language/menu/PATH choices before calling maintenance. All packaging builds embed four-part versions and icon resources. Certificate-backed builds also embed matching sparse-package name, Publisher, and application ID; unsigned builds omit the desktop package identity and MSIX.
 
