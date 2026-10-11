@@ -1,0 +1,11 @@
+[package]
+name = "unlinka-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+crossbeam-channel.workspace = true
+windows-sys.workspace = true
+

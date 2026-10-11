@@ -1,0 +1,8 @@
+[global]
+respect-gitignore = true
+# Keep natural paragraph wrapping in English and Chinese documentation.
+disable = ["MD013"]
+extend-enable = ["MD060"]
+
+[MD060]
+style = "aligned"

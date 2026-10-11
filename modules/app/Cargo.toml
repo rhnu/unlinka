@@ -1,0 +1,23 @@
+[package]
+name = "unlinka"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+unlinka-core.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+unicode-segmentation.workspace = true
+windows-sys.workspace = true
+
+[dev-dependencies]
+unlinka-validation.workspace = true
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_System_IO", "Win32_System_Ioctl"] }
+
+[[test]]
+name = "cancellation"
+harness = false
+
