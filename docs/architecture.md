@@ -95,7 +95,7 @@ cargo build --release --locked
 
 ### Continuous integration
 
-[CI](../.github/workflows/ci.yml) runs on pushes, pull requests, and manual dispatch. The Windows job uses Rust 1.99 MSVC, rustfmt, Clippy, and Rusteward for compilation, formatting, lint, and unit tests, checks generated icons against the SVG, builds the default unsigned installer with a signature-checked portable Inno 7.1 compiler, then runs sequential release-mode acceptance and cancellation tests. Acceptance uses one test thread and reports symbolic-link privilege skips; cancellation checks 1 / 8 deletion threads. Cargo commands use `--locked`. Benchmarks run manually. CI does not install the product, register packages/menus, or change certificate trust.
+[CI](../.github/workflows/ci.yml) runs on pushes, pull requests, and manual dispatch. The Windows job uses Rust 1.99 MSVC, rustfmt, Clippy, and Rusteward for compilation, formatting, lint, and unit tests, checks generated icons against the SVG, then runs sequential release-mode acceptance and cancellation tests. Acceptance uses one test thread and reports symbolic-link privilege skips; cancellation checks 1 / 8 deletion threads. Cargo commands use `--locked`. Installer packaging and benchmarks run manually. CI does not install the product, register packages/menus, or change certificate trust.
 
 ### Markdown maintenance
 
