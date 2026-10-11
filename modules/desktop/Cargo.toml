@@ -10,5 +10,5 @@ build = "build.rs"
 unlinka-core.workspace = true
 unlinka-i18n.workspace = true
 unlinka-integration.workspace = true
-windows.workspace = true
+unlinka-ui = { workspace = true, features = ["dialogs"] }
 unicode-segmentation.workspace = true

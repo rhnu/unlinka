@@ -118,10 +118,10 @@ pub(crate) fn private_dir(path: &Path) -> io::Result<File> {
     };
     let name = wide(path);
     // SAFETY: the path and security descriptor remain owned for the synchronous creation call.
-    if let Err(error) = unsafe { CreateDirectoryW(pcw(&name), Some(&raw const attributes)) } {
-        if error.code() != HRESULT::from_win32(ERROR_ALREADY_EXISTS.0) {
-            return Err(win_error(error));
-        }
+    if let Err(error) = unsafe { CreateDirectoryW(pcw(&name), Some(&raw const attributes)) }
+        && error.code() != HRESULT::from_win32(ERROR_ALREADY_EXISTS.0)
+    {
+        return Err(win_error(error));
     }
     let file = OpenOptions::new()
         .access_mode(0x0002_0000 | 0x0004_0000 | 0x80)

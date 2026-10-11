@@ -272,12 +272,11 @@ pub(super) fn installed_helper_hash_owned(
         super::validate_ownership(&tx.after)?;
         for change in &tx.files {
             super::validate_owned_path(&change.path)?;
-            if let Some(backup) = &change.backup {
-                if !super::relative(backup)?
+            if let Some(backup) = &change.backup
+                && !super::relative(backup)?
                     .starts_with(std::path::Path::new("state/backups").join(&tx.id))
-                {
-                    return Err(invalid("helper recovery backup is outside its transaction"));
-                }
+            {
+                return Err(invalid("helper recovery backup is outside its transaction"));
             }
         }
         for change in &tx.registry {

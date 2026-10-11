@@ -12,7 +12,7 @@ x64 当前用户安装器面向 Windows 10/11，无需管理员权限。默认�
 
 安装、升级、修复与卸载代码已实现。未签名构建可以安装，不包含 MSIX 或桌面包身份；签名与未签名构建使用同一产品标识和安装位置。证书签名构建及真实 Windows 生命周期/菜单验收仍待完成，签名选项与待验收范围见 [Windows 集成说明](docs/windows-integration.md)。
 
-准备 Rust MSVC、Windows SDK x64 构建工具和 Inno Setup 7.1，构建默认安装包：
+准备 Rust 1.99 MSVC、Windows SDK x64 构建工具和 Inno Setup 7.1，构建默认安装包：
 
 ```powershell
 cargo xtask pack --build-number 1 --iscc "C:\Tools\Inno\ISCC.exe"

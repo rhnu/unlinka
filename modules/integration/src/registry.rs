@@ -35,13 +35,15 @@ impl Value {
     }
 
     pub fn os_string(&self) -> io::Result<OsString> {
-        if !matches!(self.kind, 1 | 2) || self.data.len() % 2 != 0 {
+        if !matches!(self.kind, 1 | 2) || !self.data.len().is_multiple_of(2) {
             return Err(invalid("registry string has invalid type or encoding"));
         }
         let mut chars: Vec<u16> = self
             .data
-            .chunks_exact(2)
-            .map(|s| u16::from_le_bytes([s[0], s[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|s| u16::from_le_bytes(*s))
             .collect();
         if chars.pop() != Some(0) || chars.contains(&0) {
             return Err(invalid("registry string is not exactly terminated"));
@@ -151,6 +153,10 @@ pub(crate) fn read(path: &str, name: &str) -> io::Result<Option<Value>> {
     Ok(Some(Value { kind: kind.0, data }))
 }
 
+#[expect(
+    clippy::unnecessary_debug_formatting,
+    reason = "Debug preserves escaped invalid Unicode in registry identity diagnostics"
+)]
 pub(crate) fn read_string(path: &str, name: &str) -> io::Result<Option<String>> {
     read(path, name)?
         .map(|v| {

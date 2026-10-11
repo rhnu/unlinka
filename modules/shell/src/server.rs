@@ -15,6 +15,7 @@ use std::{
 
 use unlinka_i18n::{Locale, Translator, select_locale, windows_languages};
 use unlinka_integration::{Installation, InstallationState, read_settings};
+use unlinka_ui::message_box;
 use windows::{
     Win32::{
         Foundation::{
@@ -39,9 +40,7 @@ use windows::{
                 IShellExtInit_Impl, IShellItemArray, SHCreateShellItemArrayFromDataObject,
                 SHGetInstanceExplorer,
             },
-            WindowsAndMessaging::{
-                HMENU, InsertMenuW, MB_ICONERROR, MB_OK, MF_BYPOSITION, MF_STRING, MessageBoxW,
-            },
+            WindowsAndMessaging::{HMENU, InsertMenuW, MF_BYPOSITION, MF_STRING},
         },
     },
     core::{
@@ -518,17 +517,7 @@ unsafe extern "system" fn request_worker(context: *mut c_void) -> u32 {
                 "shell-request-error",
                 &[("error", error.to_string().into())],
             );
-            let text = wide(&text);
-            let title = wide("Unlinka");
-            // SAFETY: owned terminated strings remain valid for the modal error diagnostic.
-            unsafe {
-                MessageBoxW(
-                    None,
-                    PCWSTR(text.as_ptr()),
-                    PCWSTR(title.as_ptr()),
-                    MB_OK | MB_ICONERROR,
-                )
-            };
+            drop(message_box("Unlinka", &text, true));
         }
     })));
     // Destructors must run before unloading: returning through a Rust/Windows trampoline after

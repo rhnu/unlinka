@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
-mod native;
 mod settings;
+mod task;
 
 use std::{io, process::ExitCode};
 
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
     match result {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            drop(native::message(
+            drop(task::message(
                 &fallback,
                 &fallback.text(if settings_requested {
                     "error-maintenance"
@@ -67,30 +67,30 @@ fn shell_task(id: &str, fallback: &Translator) -> io::Result<u8> {
     let targets = match unlinka_core::prepare(&paths, true) {
         Ok(targets) => targets,
         Err(error) => {
-            native::message(
+            task::message(
                 &tr,
                 &tr.text("error-prepare"),
-                &native::diagnostic(&tr, &error),
+                &task::diagnostic(&tr, &error),
             )?;
             return Ok(2);
         },
     };
-    match native::confirm(&tr, targets.paths()) {
+    match task::confirm(&tr, targets.paths()) {
         Ok(true) => {},
         Ok(false) => return Ok(3),
         Err(error) => {
-            native::message(&tr, &tr.text("error-confirm"), &error.to_string())?;
+            task::message(&tr, &tr.text("error-confirm"), &error.to_string())?;
             return Ok(4);
         },
     }
-    let report = match native::execute(&tr, targets) {
+    let report = match task::execute(&tr, targets) {
         Ok(report) => report,
         Err(error) => {
-            native::message(&tr, &tr.text("error-ui"), &error.to_string())?;
+            task::message(&tr, &tr.text("error-ui"), &error.to_string())?;
             return Ok(1);
         },
     };
-    native::results(&tr, &report)?;
+    task::results(&tr, &report)?;
     Ok(if report.cancelled {
         3
     } else {

@@ -299,7 +299,7 @@ fn cleanup_matching(directory: &Path, stale_only: bool) -> io::Result<bool> {
                 .modified()?
                 .elapsed()
                 .unwrap_or(Duration::ZERO)
-                <= Duration::from_secs(86400)
+                <= Duration::from_hours(24)
         {
             continue;
         }

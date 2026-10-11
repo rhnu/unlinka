@@ -7,10 +7,8 @@ use unlinka_integration::{
     maintenance::{self, UninstallOutcome},
     read_settings,
 };
-use windows::Win32::{
-    System::Com::{COINIT_MULTITHREADED, CoInitializeEx},
-    UI::WindowsAndMessaging::{MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MessageBoxW},
-};
+use unlinka_ui::{CANCEL, Dialog, Verification, message_box};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
 #[derive(Parser)]
 #[command(version, about = "Current-user Unlinka installation maintenance")]
@@ -106,20 +104,19 @@ fn main() {
         purge_settings,
         confirm,
     } = &mut cli.command
+        && !*confirm
     {
-        if !*confirm {
-            let pending_purge = match maintenance::uninstall_purge_pending() {
-                Ok(purge) => purge,
-                Err(error) => std::process::exit(failure(&error)),
-            };
-            match confirm_uninstall(*purge_settings || pending_purge) {
-                Ok(Some(purge)) => {
-                    *purge_settings = purge;
-                    *confirm = true;
-                },
-                Ok(None) => std::process::exit(5),
-                Err(error) => std::process::exit(failure(&error)),
-            }
+        let pending_purge = match maintenance::uninstall_purge_pending() {
+            Ok(purge) => purge,
+            Err(error) => std::process::exit(failure(&error)),
+        };
+        match confirm_uninstall(*purge_settings || pending_purge) {
+            Ok(Some(purge)) => {
+                *purge_settings = purge;
+                *confirm = true;
+            },
+            Ok(None) => std::process::exit(5),
+            Err(error) => std::process::exit(failure(&error)),
         }
     }
     loop {
@@ -138,48 +135,21 @@ fn main() {
 }
 
 fn wait_retry(reason: &str) -> io::Result<bool> {
-    use windows::{
-        Win32::UI::Controls::{
-            TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION, TaskDialogIndirect,
-        },
-        core::PCWSTR,
-    };
-    let translator = translator();
-    let title = wide("Unlinka");
-    let heading = wide(&translator.text("maintenance-wait-title"));
-    let content = wide(&format!(
-        "{}\n\n{reason}",
-        translator.text("maintenance-wait-content")
-    ));
-    let retry = wide(&translator.text("maintenance-retry"));
-    let cancel = wide(&translator.text("button-cancel"));
-    let buttons = [
-        TASKDIALOG_BUTTON {
-            nButtonID: 1,
-            pszButtonText: PCWSTR(retry.as_ptr()),
-        },
-        TASKDIALOG_BUTTON {
-            nButtonID: 2,
-            pszButtonText: PCWSTR(cancel.as_ptr()),
-        },
-    ];
-    let config = TASKDIALOGCONFIG {
-        cbSize: u32::try_from(std::mem::size_of::<TASKDIALOGCONFIG>())
-            .expect("Windows structure size fits u32"),
-        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION,
-        pszWindowTitle: PCWSTR(title.as_ptr()),
-        pszMainInstruction: PCWSTR(heading.as_ptr()),
-        pszContent: PCWSTR(content.as_ptr()),
-        cButtons: 2,
-        pButtons: buttons.as_ptr(),
-        nDefaultButton: 2,
-        ..Default::default()
-    };
-    let mut pressed = 2;
-    // SAFETY: config, custom buttons and their strings remain live through the modal dialog.
-    unsafe { TaskDialogIndirect(&raw const config, Some(&raw mut pressed), None, None) }
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    Ok(pressed == 1)
+    let tr = translator();
+    let result = Dialog {
+        title: "Unlinka",
+        instruction: &tr.text("maintenance-wait-title"),
+        content: &format!("{}\n\n{reason}", tr.text("maintenance-wait-content")),
+        buttons: &[
+            (1, &tr.text("maintenance-retry")),
+            (CANCEL, &tr.text("button-cancel")),
+        ],
+        default_button: CANCEL,
+        details: None,
+        verification: None,
+    }
+    .show()?;
+    Ok(result.button == 1)
 }
 
 fn run(action: &Action) -> io::Result<i32> {
@@ -275,26 +245,7 @@ fn failure(error: &io::Error) -> i32 {
     }
 }
 
-fn show(message: &str, error: bool) {
-    let title: Vec<u16> = "Unlinka\0".encode_utf16().collect();
-    let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
-    // SAFETY: both terminated UTF-16 strings remain live through the modal message box.
-    unsafe {
-        MessageBoxW(
-            None,
-            windows::core::PCWSTR(message.as_ptr()),
-            windows::core::PCWSTR(title.as_ptr()),
-            MB_OK
-                | if error {
-                    MB_ICONERROR
-                } else {
-                    MB_ICONINFORMATION
-                },
-        );
-    }
-}
-
-fn wide(message: &str) -> Vec<u16> { message.encode_utf16().chain(Some(0)).collect() }
+fn show(message: &str, error: bool) { drop(message_box("Unlinka", message, error)); }
 
 fn translator() -> Translator {
     let saved = read_settings().ok().map(|s| s.language);
@@ -307,59 +258,22 @@ fn translator() -> Translator {
 }
 
 fn confirm_uninstall(purge: bool) -> io::Result<Option<bool>> {
-    use windows::{
-        Win32::UI::Controls::{
-            TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION,
-            TDF_VERIFICATION_FLAG_CHECKED, TaskDialogIndirect,
-        },
-        core::{BOOL, PCWSTR},
-    };
-    let translator = translator();
-    let title = wide("Unlinka");
-    let heading = wide(&translator.text("maintenance-uninstall-title"));
-    let content = wide(&translator.text("maintenance-uninstall-content"));
-    let verify = wide(&translator.text("maintenance-purge-settings"));
-    let remove = wide(&translator.text("maintenance-uninstall-button"));
-    let cancel = wide(&translator.text("button-cancel"));
-    let buttons = [
-        TASKDIALOG_BUTTON {
-            nButtonID: 1,
-            pszButtonText: PCWSTR(remove.as_ptr()),
-        },
-        TASKDIALOG_BUTTON {
-            nButtonID: 2,
-            pszButtonText: PCWSTR(cancel.as_ptr()),
-        },
-    ];
-    let config = TASKDIALOGCONFIG {
-        cbSize: u32::try_from(std::mem::size_of::<TASKDIALOGCONFIG>())
-            .expect("Windows structure size fits u32"),
-        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION
-            | if purge {
-                TDF_VERIFICATION_FLAG_CHECKED
-            } else {
-                windows::Win32::UI::Controls::TASKDIALOG_FLAGS::default()
-            },
-        pszWindowTitle: PCWSTR(title.as_ptr()),
-        pszMainInstruction: PCWSTR(heading.as_ptr()),
-        pszContent: PCWSTR(content.as_ptr()),
-        cButtons: 2,
-        pButtons: buttons.as_ptr(),
-        nDefaultButton: 2,
-        pszVerificationText: PCWSTR(verify.as_ptr()),
-        ..Default::default()
-    };
-    let mut pressed = 2;
-    let mut checked = BOOL::from(purge);
-    // SAFETY: config, custom buttons and their strings remain live through the modal dialog.
-    unsafe {
-        TaskDialogIndirect(
-            &raw const config,
-            Some(&raw mut pressed),
-            None,
-            Some(&raw mut checked),
-        )
+    let tr = translator();
+    let result = Dialog {
+        title: "Unlinka",
+        instruction: &tr.text("maintenance-uninstall-title"),
+        content: &tr.text("maintenance-uninstall-content"),
+        buttons: &[
+            (1, &tr.text("maintenance-uninstall-button")),
+            (CANCEL, &tr.text("button-cancel")),
+        ],
+        default_button: CANCEL,
+        details: None,
+        verification: Some(Verification {
+            label: &tr.text("maintenance-purge-settings"),
+            checked: purge,
+        }),
     }
-    .map_err(|e| io::Error::other(e.to_string()))?;
-    Ok((pressed == 1).then(|| checked.as_bool()))
+    .show()?;
+    Ok((result.button == 1).then_some(result.checked))
 }

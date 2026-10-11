@@ -845,7 +845,7 @@ dependencies = [
  "unlinka-core",
  "unlinka-i18n",
  "unlinka-integration",
- "windows",
+ "unlinka-ui",
 ]
 
 [[package]]
@@ -866,6 +866,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "unlinka-i18n",
+ "unlinka-ui",
  "windows",
 ]
 
@@ -884,8 +885,17 @@ version = "0.1.1"
 dependencies = [
  "unlinka-i18n",
  "unlinka-integration",
+ "unlinka-ui",
  "windows",
  "windows-core",
+]
+
+[[package]]
+name = "unlinka-ui"
+version = "0.1.1"
+dependencies = [
+ "windows-sys",
+ "winsafe",
 ]
 
 [[package]]
@@ -1039,6 +1049,12 @@ checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
 dependencies = [
  "windows-link",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ef0ffc427f045c0cc9ebffd6f4f91153dcd2a1547b5c3c29ee3f541e16e95c6"
 
 [[package]]
 name = "xtask"

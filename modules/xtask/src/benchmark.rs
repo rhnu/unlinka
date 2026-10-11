@@ -248,10 +248,11 @@ fn resolve_binary(workspace: &Path, supplied: Option<PathBuf>) -> io::Result<Pat
         let message: Value = serde_json::from_slice(line).map_err(|error| {
             io::Error::other(format!("cannot parse Cargo build artifact JSON: {error}"))
         })?;
-        if message["reason"] == "compiler-artifact" && message["target"]["name"] == "unlinka" {
-            if let Some(executable) = message["executable"].as_str() {
-                return Path::new(executable).canonicalize();
-            }
+        if message["reason"] == "compiler-artifact"
+            && message["target"]["name"] == "unlinka"
+            && let Some(executable) = message["executable"].as_str()
+        {
+            return Path::new(executable).canonicalize();
         }
     }
     Err(io::Error::other(

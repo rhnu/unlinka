@@ -276,19 +276,20 @@ Inno 的 `InitializeUninstall` 只校验并复制维护工具至临时目录。I
 | `modules/i18n`        | 语言协商、FTL 资源和格式化                             |
 | `modules/integration` | 注册与状态、任务协议、PATH/包生命周期；维护工具 bin    |
 | `modules/launcher`    | 稳定 CLI 启动器                                        |
-| `modules/desktop`     | 原生桌面任务进程及简短语言/菜单设置入口                |
+| `modules/desktop`     | 桌面任务文案、删除 worker/取消/结果及语言/菜单设置入口 |
+| `modules/ui`          | WinSafe 任务对话框、详情窗口、进度事件及诊断提示       |
 | `modules/shell`       | cdylib、两个 COM 类及公共选中项适配                    |
 | `assets`              | 可编辑 SVG 源图及生成的 Windows PNG / 多尺寸 ICO 资源  |
 | `packaging`           | Inno 脚本、身份 manifest 模板、固定身份及签名脚本      |
 | `modules/xtask`       | 图标生成、打包、版本生成、payload 核验和 benchmark     |
 
-Shell 不链接删除引擎；core 不依赖 i18n、注册表设置或 Shell。COM 与包部署采用 `windows` 0.62.2 及匹配的 `windows-core`，已有 core 的 `windows-sys` 调用保持现状。Fluent 使用 `fluent-bundle` 0.16.0 / `unic-langid` 0.9.6；版本与 features 在 [Cargo.toml](../Cargo.toml) 声明并通过 Cargo.lock 固定。
+Shell 不链接删除引擎；core 不依赖 i18n、注册表设置或 Shell。`unlinka-ui` 通过 WinSafe 0.0.29 集中原生 UI 操作，不依赖 core、integration 或 i18n；调用方提供文案并管理业务。详情使用 WinSafe 控件构造有 owner 的模态窗口，按 owner DPI 初始化，并在 `WM_DPICHANGED` 时调整尺寸和字体。UI 的 `dialogs` feature 仅供桌面和维护工具使用，Shell 只调用基本诊断提示；integration 的 `maintenance-ui` 为维护 bin 的默认可选 feature，workspace 中的库调用方关闭它。COM 与包部署继续采用 `windows` 0.62.2 及匹配的 `windows-core`，已有 core 的 `windows-sys` 调用保持现状，UI 用私有封装补足 WinSafe 未覆盖的任务消息和 DPI API。Fluent 使用 `fluent-bundle` 0.16.0 / `unic-langid` 0.9.6；版本与 features 在 [Cargo.toml](../Cargo.toml) 声明并通过 Cargo.lock 固定。
 
 所有构建先生成版本、构建程序并嵌入资源。四个 EXE 共用 Windows manifest 与构建辅助模块，均声明 Common Controls v6；只有签名桌面构建额外嵌入 MSIX 身份。打包产物静态链接 MSVC CRT，不要求另装 VC++ 运行库；RC 显式使用 UTF-8 读取资源脚本和路径。默认未签名构建直接生成 payload 和 Setup，不生成身份包或桌面包身份。可选签名构建先签名 EXE/DLL、构建并签名身份包，再构建并签名 Setup；签名后不能改写二进制。签名构建必须核对包 Publisher、程序身份和证书 Subject 一致。
 
 ### 6.1 构建统一安装包
 
-构建需要 Windows MSVC、Windows SDK x64 的 `rc` 及 Inno Setup 7.1；签名构建另外需要 `makeappx` 和 `signtool`。`--iscc` 或环境变量 `UNLINKA_ISCC` 指定编译器；`--sdk-bin` 可显式指定 SDK x64 bin，否则选取已安装最高版本。`.github/workflows/ci.yml` 构建相同的默认未签名安装包。
+构建需要 Rust 1.99 MSVC、Windows SDK x64 的 `rc` 及 Inno Setup 7.1；签名构建另外需要 `makeappx` 和 `signtool`。`--iscc` 或环境变量 `UNLINKA_ISCC` 指定编译器；`--sdk-bin` 可显式指定 SDK x64 bin，否则选取已安装最高版本。`.github/workflows/ci.yml` 构建相同的默认未签名安装包。
 
 图标统一维护在根目录 `assets/`。编辑 `assets/Unlinka.svg` 后运行 `cargo xtask assets`，更新 `assets/windows` 中的多尺寸 ICO、manifest 基础 PNG、100–400% 缩放及应用列表目标尺寸资源。`cargo xtask assets --check` 检查生成资源与 SVG 是否一致；CI 执行此检查。图标采用黑白几何断链，同一设计用于明暗主题，外缘保持透明。[图标资源说明](architecture.md#icon-assets) 列出尺寸和生成依赖。
 

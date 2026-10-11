@@ -99,10 +99,10 @@ impl Fixture {
     /// filesystem directory-creation failure.
     pub fn folder(&self, relative: impl AsRef<Path>) -> io::Result<PathBuf> {
         let path = self.path(relative)?;
-        if let Ok(metadata) = fs::symlink_metadata(&path) {
-            if is_link(&metadata) {
-                return Err(io::Error::other("fixture folder is a link"));
-            }
+        if let Ok(metadata) = fs::symlink_metadata(&path)
+            && is_link(&metadata)
+        {
+            return Err(io::Error::other("fixture folder is a link"));
         }
         fs::create_dir_all(&path)?;
         Ok(path)

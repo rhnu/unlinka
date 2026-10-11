@@ -12,7 +12,7 @@ The x64 current-user installer targets Windows 10/11 without administrator privi
 
 Installer, repair, upgrade, and uninstall code is implemented. Unsigned builds are installable and contain no MSIX or desktop package identity. Signed and unsigned builds share the same product identity and installation. Certificate-backed signing and real Windows lifecycle/menu acceptance remain pending. See [integration and packaging](docs/windows-integration.md) for signing options and remaining validation.
 
-Build the default installer with Rust MSVC, Windows SDK x64 build tools, and Inno Setup 7.1:
+Build the default installer with Rust 1.99 MSVC, Windows SDK x64 build tools, and Inno Setup 7.1:
 
 ```powershell
 cargo xtask pack --build-number 1 --iscc "C:\Tools\Inno\ISCC.exe"

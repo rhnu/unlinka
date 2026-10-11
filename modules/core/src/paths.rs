@@ -60,10 +60,11 @@ pub(crate) fn validate_syntax(path: &Path) -> io::Result<()> {
             _ => {},
         }
     }
-    if let Some(Component::Prefix(prefix)) = path.components().next() {
-        if matches!(prefix.kind(), Prefix::Disk(_)) && !path.has_root() {
-            return Err(invalid("drive-relative paths are not allowed"));
-        }
+    if let Some(Component::Prefix(prefix)) = path.components().next()
+        && matches!(prefix.kind(), Prefix::Disk(_))
+        && !path.has_root()
+    {
+        return Err(invalid("drive-relative paths are not allowed"));
     }
     Ok(())
 }

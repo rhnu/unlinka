@@ -324,17 +324,16 @@ fn validate_options(options: &Options) -> io::Result<()> {
             "timestamp URL must be an HTTP or HTTPS RFC3161 endpoint",
         ));
     }
-    if let Some(thumbprint) = &options.certificate_thumbprint {
-        if thumbprint.len() != 40
+    if let Some(thumbprint) = &options.certificate_thumbprint
+        && (thumbprint.len() != 40
             || !thumbprint
                 .chars()
-                .all(|character| character.is_ascii_hexdigit())
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "certificate thumbprint must be 40 hexadecimal characters",
-            ));
-        }
+                .all(|character| character.is_ascii_hexdigit()))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "certificate thumbprint must be 40 hexadecimal characters",
+        ));
     }
     Ok(())
 }
@@ -363,8 +362,8 @@ fn checked(command: &mut Command) -> io::Result<()> {
         Ok(())
     } else {
         Err(io::Error::other(format!(
-            "build tool exited {status}: {:?}",
-            command.get_program()
+            "build tool exited {status}: {}",
+            command.get_program().display()
         )))
     }
 }

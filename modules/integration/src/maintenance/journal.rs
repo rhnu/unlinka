@@ -13,13 +13,12 @@ pub(super) fn rollback(root: &Path, tx: &Transaction) -> io::Result<()> {
     let mut recovery = tx.clone();
     let mut failures = Vec::new();
     let mut package_removed = true;
-    if tx.package_touched {
-        if let Err(error) =
+    if tx.package_touched
+        && let Err(error) =
             rollback_package_publisher(tx).and_then(|publisher| package::remove(publisher, root))
-        {
-            package_removed = false;
-            failures.push(error.to_string());
-        }
+    {
+        package_removed = false;
+        failures.push(error.to_string());
     }
     // Never remove an external-location payload while its package remains registered.
     if package_removed {
@@ -60,10 +59,10 @@ pub(super) fn rollback(root: &Path, tx: &Transaction) -> io::Result<()> {
     }
     // Keep compensating backups until all restorations succeed so a later
     // recovery can retry package removal or file restoration without data loss.
-    if failures.is_empty() {
-        if let Err(error) = cleanup_artifacts(root, &recovery) {
-            failures.push(error.to_string());
-        }
+    if failures.is_empty()
+        && let Err(error) = cleanup_artifacts(root, &recovery)
+    {
+        failures.push(error.to_string());
     }
     if let Some(installation) = &tx.before_install {
         for (name, expected) in &tx.before.files {
@@ -86,16 +85,16 @@ pub(super) fn rollback(root: &Path, tx: &Transaction) -> io::Result<()> {
         retained.files.extend(tx.before.files.clone());
         retained.pending = tx.files.iter().map(|c| c.path.clone()).collect();
         let helper = root.join("maintenance/unlinka-maintenance.exe");
-        if !helper.exists() {
-            if let Some(expected) = tx.after.files.get("maintenance/unlinka-maintenance.exe") {
-                let executable = std::env::current_exe()?;
-                if hash(&executable)? == *expected {
-                    copy_file(&executable, &helper)?;
-                    retained.files.insert(
-                        "maintenance/unlinka-maintenance.exe".into(),
-                        expected.clone(),
-                    );
-                }
+        if !helper.exists()
+            && let Some(expected) = tx.after.files.get("maintenance/unlinka-maintenance.exe")
+        {
+            let executable = std::env::current_exe()?;
+            if hash(&executable)? == *expected {
+                copy_file(&executable, &helper)?;
+                retained.files.insert(
+                    "maintenance/unlinka-maintenance.exe".into(),
+                    expected.clone(),
+                );
             }
         }
 

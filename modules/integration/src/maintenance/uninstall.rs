@@ -185,17 +185,15 @@ fn finalize_removal(
                 ));
                 continue;
             }
-            if dir.exists() {
-                if let Err(error) = fs::remove_dir(&dir) {
-                    if error.raw_os_error() == Some(145) {
-                        retained_unknown = true;
-                        let _ignored = log_diagnostic(&format!(
-                            "Preserved unowned files in {}",
-                            dir.display()
-                        ));
-                    } else {
-                        return Err(error);
-                    }
+            if dir.exists()
+                && let Err(error) = fs::remove_dir(&dir)
+            {
+                if error.raw_os_error() == Some(145) {
+                    retained_unknown = true;
+                    let _ignored =
+                        log_diagnostic(&format!("Preserved unowned files in {}", dir.display()));
+                } else {
+                    return Err(error);
                 }
             }
         }

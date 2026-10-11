@@ -1,18 +1,20 @@
 [workspace]
-members = ["modules/core", "modules/app", "modules/validation", "modules/xtask", "modules/integration", "modules/launcher", "modules/i18n", "modules/desktop", "modules/shell"]
+members = ["modules/core", "modules/app", "modules/validation", "modules/xtask", "modules/integration", "modules/launcher", "modules/i18n", "modules/desktop", "modules/shell", "modules/ui"]
 default-members = ["modules/app"]
 resolver = "3"
 
 [workspace.package]
 version = "0.1.1"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.99"
 
 [workspace.dependencies]
 unlinka-core = { path = "modules/core" }
 unlinka-validation = { path = "modules/validation" }
-unlinka-integration = { path = "modules/integration" }
+unlinka-integration = { path = "modules/integration", default-features = false }
 unlinka-i18n = { path = "modules/i18n" }
+unlinka-ui = { path = "modules/ui", default-features = false }
+winsafe = { version = "0.0.29", features = ["user"] }
 fluent-bundle = "0.16.0"
 unic-langid = "0.9.6"
 windows-core = "0.62.2"

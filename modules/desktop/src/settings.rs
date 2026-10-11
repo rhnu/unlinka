@@ -2,15 +2,15 @@ use std::{ffi::OsString, io};
 
 use unlinka_i18n::Translator;
 use unlinka_integration::{Installation, maintenance, read_settings};
+use unlinka_ui::CANCEL;
 
-use crate::native;
-const CANCEL: i32 = 2;
+use crate::task;
 
 /// Stages all choices locally, then delegates one atomic maintenance transaction.
 pub(crate) fn show(tr: &Translator) -> io::Result<u8> {
     Installation::current()?.ok_or_else(|| io::Error::other(tr.text("settings-portable")))?;
     let settings = read_settings()?;
-    let selected = native::dialog(
+    let selected = task::presentation(
         tr,
         &tr.text("settings-title"),
         &format!(
@@ -75,10 +75,10 @@ pub(crate) fn show(tr: &Translator) -> io::Result<u8> {
         return Ok(3);
     }
     if code == 0 {
-        native::message(tr, &tr.text("settings-title"), &tr.text("settings-saved"))?;
+        task::message(tr, &tr.text("settings-title"), &tr.text("settings-saved"))?;
         Ok(0)
     } else {
-        native::message(
+        task::message(
             tr,
             &tr.text("error-maintenance"),
             &format!("{} ({code})", tr.text("error-maintenance")),
@@ -91,7 +91,7 @@ fn choose_settings(
     tr: &Translator,
     mut settings: unlinka_integration::Settings,
 ) -> io::Result<Option<unlinka_integration::Settings>> {
-    let language = native::dialog(
+    let language = task::presentation(
         tr,
         &tr.text("settings-language"),
         &settings.language,
@@ -123,7 +123,7 @@ fn choose_settings(
     let Some(path) = path else {
         return Ok(None);
     };
-    let save = native::dialog(
+    let save = task::presentation(
         tr,
         &tr.text("settings-title"),
         &format!(
@@ -159,7 +159,7 @@ fn choose_settings(
 }
 
 fn enabled(tr: &Translator, title: &str, current: bool) -> io::Result<Option<bool>> {
-    let selected = native::dialog(
+    let selected = task::presentation(
         tr,
         &tr.text(title),
         "",
