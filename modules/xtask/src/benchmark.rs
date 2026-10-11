@@ -10,7 +10,7 @@ use std::{
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use unlinka_validation::{Fixture, counts, run_command};
+use unlinka_validation::{Fixture, run_command};
 
 #[cfg(test)]
 mod tests;
@@ -364,7 +364,7 @@ fn sample(
     let output = if let Some(threads) = method.strip_prefix("unlinka-") {
         let mut command = Command::new(binary);
         command
-            .args(["-r", "--yes", "--threads", threads, "--"])
+            .args(["-r", "--yes", "--json", "--threads", threads, "--"])
             .arg(&target)
             .current_dir(fixture.root());
         run_command(&mut command)?
@@ -378,25 +378,22 @@ fn sample(
     }
     let stdout = String::from_utf8(output.stdout).map_err(io::Error::other)?;
     let operation_milliseconds = if method.starts_with("unlinka-") {
-        let counts = counts(&stderr)?;
-        if counts.files != u64::from(file_count)
-            || counts.directories != directories
-            || counts.links != 0
-            || counts.failed != 0
-            || !stdout.is_empty()
+        let report: Value = serde_json::from_str(&stdout).map_err(io::Error::other)?;
+        if report["schema_version"] != 1
+            || report["files"].as_u64() != Some(u64::from(file_count))
+            || report["directories"].as_u64() != Some(directories)
+            || report["links"] != 0
+            || report["failed"] != 0
+            || report["cancelled"] != false
+            || report["exit_code"] != 0
         {
             return Err(io::Error::other(format!(
                 "incorrect deletion report: {stderr}"
             )));
         }
-        stderr
-            .lines()
-            .find_map(|line| line.strip_prefix("Deletion finished in "))
-            .and_then(|line| line.split_once("s: "))
+        report["elapsed_seconds"]
+            .as_f64()
             .ok_or_else(|| io::Error::other("deletion elapsed time missing"))?
-            .0
-            .parse::<f64>()
-            .map_err(io::Error::other)?
             * 1000.0
     } else {
         stdout.trim().parse::<f64>().map_err(io::Error::other)?

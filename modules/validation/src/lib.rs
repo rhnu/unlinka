@@ -207,6 +207,7 @@ pub fn run(binary: &Path, args: &[OsString], cwd: &Path) -> io::Result<Output> {
 /// Panics if the standard process API fails to provide requested piped handles.
 pub fn run_command(command: &mut Command) -> io::Result<Output> {
     command
+        .env("UNLINKA_LANG", "en-US")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -283,7 +284,12 @@ pub struct Counts {
 pub fn counts(text: &str) -> io::Result<Counts> {
     let line = text
         .lines()
-        .find(|line| line.starts_with("Deletion ") || line.starts_with("Dry-run scan "))
+        .find(|line| {
+            let line = line.to_ascii_lowercase();
+            line.starts_with("deletion ")
+                || line.starts_with("dry-run scan ")
+                || line.starts_with("scan ")
+        })
         .ok_or_else(|| io::Error::other("CLI summary missing"))?;
     let (_, counts) = line
         .split_once(": ")

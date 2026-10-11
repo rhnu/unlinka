@@ -8,6 +8,10 @@ build = "build.rs"
 
 [dependencies]
 unlinka-core.workspace = true
+unlinka-i18n.workspace = true
+unlinka-integration.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 clap.workspace = true
 ctrlc.workspace = true
 unicode-segmentation.workspace = true

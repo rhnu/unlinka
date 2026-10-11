@@ -12,7 +12,8 @@ use std::{
 use crossbeam_channel::{Receiver, SendTimeoutError, Sender, bounded};
 
 use crate::{
-    DeleteOptions, DeleteReport, Failure, PreparedTargets,
+    DeleteOptions, DeleteReport, Failure, PreparedTargets, Progress,
+    diagnostic::{DiagnosticCode, error},
     paths::{Protection, pin_ancestors},
     win::{Finder, Handle, Kind},
 };
@@ -23,6 +24,12 @@ struct Run<'a> {
     report: Mutex<DeleteReport>,
     // Populated before workers start and kept alive through their completion.
     ancestors: Vec<Handle>,
+}
+
+struct MonitorStop<'a>(&'a AtomicBool);
+
+impl Drop for MonitorStop<'_> {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
 }
 
 impl Run<'_> {
@@ -149,7 +156,8 @@ fn process(leaf: Leaf, run: &Run<'_>) {
         match opened.and_then(|handle| {
             let kind = handle.kind()?;
             if kind == Kind::Directory {
-                return Err(io::Error::other(
+                return Err(error(
+                    DiagnosticCode::DirectoryChanged,
                     "leaf became an ordinary directory; refusing to traverse it",
                 ));
             }
@@ -324,14 +332,15 @@ fn validate_roots(targets: PreparedTargets, run: &Run<'_>) -> Result<ValidatedRo
             )?;
             let identity = handle.identity()?;
             if identity != entry.identity {
-                return Err(io::Error::other(
+                return Err(error(
+                    DiagnosticCode::IdentityChanged,
                     "target identity or type changed after confirmation",
                 ));
             }
             protection.check(&handle.final_path()?, identity)?;
             if identity.kind == Kind::Directory && !run.options.recursive {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                return Err(error(
+                    DiagnosticCode::RecursiveRequired,
                     "ordinary directory requires recursive mode",
                 ));
             }
@@ -360,6 +369,7 @@ pub(crate) fn execute(
     targets: PreparedTargets,
     options: &DeleteOptions,
     cancelled: &AtomicBool,
+    observer: Option<&(dyn Fn(Progress) + Sync)>,
 ) -> DeleteReport {
     let start = Instant::now();
     let mut run = Run {
@@ -372,8 +382,8 @@ pub(crate) fn execute(
         run.fail(
             PathBuf::new(),
             "options",
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
+            error(
+                DiagnosticCode::InvalidOptions,
                 "threads must be between 1 and 64",
             ),
         );
@@ -383,34 +393,65 @@ pub(crate) fn execute(
             Ok(ValidatedRoots { roots, ancestors }) => {
                 run.ancestors = ancestors;
                 // All roots are verified and pinned before the first mutation.
-                thread::scope(|scope| {
-                    let (sender, receiver) =
-                        bounded((options.threads.saturating_sub(1) * 2).max(1));
-                    for _ in 1..options.threads {
-                        let receiver = receiver.clone();
-                        let run = &run;
-                        scope.spawn(move || worker(&receiver, run));
+                let monitoring = AtomicBool::new(true);
+                thread::scope(|monitor_scope| {
+                    if let Some(observer) = observer {
+                        let report = &run.report;
+                        let monitoring = &monitoring;
+                        monitor_scope.spawn(move || {
+                            while monitoring.load(Ordering::Acquire) {
+                                let progress = {
+                                    let report = report.lock().expect("report lock poisoned");
+                                    Progress {
+                                        files: report.files,
+                                        directories: report.directories,
+                                        links: report.links,
+                                        failed: report.failed,
+                                        elapsed: start.elapsed(),
+                                    }
+                                };
+                                observer(progress);
+                                thread::sleep(Duration::from_millis(100));
+                            }
+                        });
                     }
-                    let queue = (options.threads > 1).then_some(&sender);
-                    for Root { path, handle, kind } in roots {
-                        if run.stopped() {
-                            break;
+                    let stop_monitor = MonitorStop(&monitoring);
+                    // Worker scope ends before the monitor is stopped so the last
+                    // returned report includes every in-flight operation.
+                    thread::scope(|worker_scope| {
+                        let (sender, receiver) =
+                            bounded((options.threads.saturating_sub(1) * 2).max(1));
+                        for _ in 1..options.threads {
+                            let receiver = receiver.clone();
+                            let run = &run;
+                            worker_scope.spawn(move || worker(&receiver, run));
                         }
-                        if kind == Kind::Directory {
-                            scan(Directory::new(path, handle, None), queue, &run);
-                        } else {
-                            schedule(
-                                Leaf {
-                                    path,
-                                    handle: Some(handle),
-                                    parent: None,
-                                },
-                                queue,
-                                &run,
-                            );
+                        // Only workers retain receivers. If all of them unwind,
+                        // the scanner observes disconnection instead of waiting
+                        // forever on a full queue while the scopes try to join.
+                        drop(receiver);
+                        let queue = (options.threads > 1).then_some(&sender);
+                        for Root { path, handle, kind } in roots {
+                            if run.stopped() {
+                                break;
+                            }
+                            if kind == Kind::Directory {
+                                scan(Directory::new(path, handle, None), queue, &run);
+                            } else {
+                                schedule(
+                                    Leaf {
+                                        path,
+                                        handle: Some(handle),
+                                        parent: None,
+                                    },
+                                    queue,
+                                    &run,
+                                );
+                            }
                         }
-                    }
-                    drop(sender);
+                        drop(sender);
+                    });
+                    drop(stop_monitor);
                 });
             },
         }

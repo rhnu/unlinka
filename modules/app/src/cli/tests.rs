@@ -107,3 +107,41 @@ fn script_exit_codes_are_stable() {
     assert_eq!(ExitStatus::Cancelled as u8, 3);
     assert_eq!(ExitStatus::ConfirmationFailed as u8, 4);
 }
+
+#[test]
+fn bootstrap_stops_before_filename_language_and_json_options() {
+    let arguments = ["unlinka", "--lang=zh-CN", "--", "--lang", "en-US", "--json"]
+        .map(std::ffi::OsString::from);
+    assert_eq!(super::bootstrap(&arguments), (Some("zh-CN".into()), false));
+}
+
+#[test]
+fn malformed_language_still_requests_json_parameter_error() {
+    let arguments = ["unlinka", "--lang", "--json"].map(std::ffi::OsString::from);
+    assert!(super::bootstrap(&arguments).1);
+}
+
+#[test]
+fn integration_status_is_an_option_and_mutually_exclusive_with_deletion() {
+    let cli = Cli::try_parse_from(["unlinka", "--integration-status", "--json"]).unwrap();
+    assert!(cli.integration_status);
+    assert!(Cli::try_parse_from(["unlinka", "--integration-status", "target"]).is_err());
+    assert!(Cli::try_parse_from(["unlinka", "--integration-status", "--threads", "4"]).is_err());
+    let cli = Cli::try_parse_from(["unlinka", "integration"]).unwrap();
+    assert_eq!(cli.paths, [std::path::PathBuf::from("integration")]);
+}
+
+#[test]
+fn localized_command_renders_help_before_parsing() {
+    let translator = unlinka_i18n::Translator::new(unlinka_i18n::Locale::ZhCn);
+    let mut command = super::command(&translator);
+    let help = command.render_long_help().to_string();
+    assert!(help.contains("永久删除"));
+    assert!(help.contains("--integration-status"));
+    assert!(!help.contains("Print help"));
+    assert!(
+        command
+            .try_get_matches_from(["unlinka", "--lang", "zh-CN", "--json", "file"])
+            .is_ok()
+    );
+}

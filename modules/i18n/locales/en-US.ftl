@@ -1,0 +1,166 @@
+menu-delete = Permanently delete with Unlinka…
+shell-request-error = Unable to open the deletion task. { $error }
+shell-error-title = Unlinka
+app-title = Unlinka
+confirm-title = Unlinka — Confirm deletion
+confirm-one = Permanently delete “{ $name }”?
+confirm-many = Permanently delete { $count } selected items?
+confirm-warning = These items will not enter the Recycle Bin. Cancelling cannot restore items already deleted.
+confirm-console = Permanently delete the following items (without using the Recycle Bin):
+confirm-prompt = Delete { $count } items? [y/N]
+confirm-terminal = Console confirmation requires interactive stdin and stderr. Use --yes or --dry-run for scripts.
+confirm-eof = Confirmation input ended before an answer was received.
+button-delete = Delete permanently
+button-cancel = Cancel
+button-close = Close
+button-save = Save
+settings-change = Change settings
+button-repair = Repair integration
+show-paths = Show all paths
+hide-paths = Hide all paths
+location = Location:
+cli-about = Permanently delete Windows files and directories
+cli-long-about = Permanently delete Windows files and directories. Deleted items do not enter the Recycle Bin. Directory contents require --recursive. Reparse points are removed as links without following their targets.
+cli-usage = Usage:
+cli-options = Options
+cli-arguments = Arguments
+help-paths = Files, directories, or links to delete; use -- before paths beginning with -.
+help-recursive = Delete directory contents recursively.
+help-confirm = Confirmation interface: native or console (default: native).
+help-yes = Skip confirmation and permanently delete the selected targets.
+help-dry-run = Scan and report counts without deleting anything or asking for confirmation.
+help-threads = Total thread budget, including scanning, from 1 to 64.
+help-verbose = Print additional preparation details.
+help-lang = Interface language: auto, zh-CN, or en-US.
+help-json = Write one stable JSON result to stdout; confirmation still applies.
+help-status = Report installation and integration status instead of deleting paths.
+help-help = Print help.
+help-version = Print version.
+error-arguments = Invalid command-line arguments.
+error-unknown = Unknown argument: { $argument }
+error-missing = Required arguments are missing: { $argument }
+error-value = Invalid value for { $argument }: { $value }
+error-conflict = Conflicting arguments: { $argument }
+error-hint = Use --help to see the available options.
+error-prepare = Target preparation failed.
+error-confirm = Confirmation failed.
+error-interrupt = Cannot install the cancellation handler.
+error-installation = The installation is unavailable or undergoing maintenance.
+error-request = The Explorer request could not be read completely.
+error-ui = The native window could not be displayed.
+error-maintenance = Integration maintenance failed.
+error-io = System operation failed.
+supplied-paths = Supplied paths:
+preparing = Preparing { $count } supplied paths.
+prepared = Prepared { $count } top-level targets after normalization and overlap removal.
+dry-run = Dry run: no items will be deleted. Top-level targets:
+permanent-warning = Permanent deletion: items do not enter the Recycle Bin.
+starting = Starting { $mode } for { $count } top-level targets with a total thread budget of { $threads } (including scanning).
+mode-scan = scan
+mode-delete = deletion
+cancelled-before = Cancelled. No targets were deleted.
+state-finished = finished
+state-cancelled = cancelled
+files-count = { $files ->
+    [one] { $files } file
+   *[other] { $files } files
+    }
+directories-count = { $directories ->
+    [one] { $directories } directory
+   *[other] { $directories } directories
+    }
+links-count = { $links ->
+    [one] { $links } link
+   *[other] { $links } links
+    }
+failures-count = { $failed ->
+    [one] { $failed } failure
+   *[other] { $failed } failures
+    }
+report = { $mode } { $state } in { $seconds }s: { files-count }, { directories-count }, { links-count }; { failures-count }.
+dry-run-note = Nothing was deleted. Counts cover scanned targets and, with --recursive, their contents. Links are counted separately; their targets are not scanned.
+failure = { $operation } “{ $path }”: { $message }
+failures-omitted = { $count ->
+    [one] One additional failure omitted.
+   *[other] { $count } additional failures omitted.
+    }
+progress-title = Permanently deleting selected items
+progress = Completed: { files-count }, { directories-count }, { links-count }. Failures: { $failed }. Elapsed: { $seconds }s.
+progress-cancelling = Cancelling… Waiting for operations already started to return.
+results-title = Deletion results
+settings-title = Unlinka settings
+settings-language = Interface language
+settings-auto = Follow Windows display language
+settings-menus = Explorer menus
+settings-path = Command-line PATH integration
+settings-enable = Enable
+settings-disable = Disable
+settings-saved = Settings saved. New menus and tasks use the selected language. Existing terminals may need to be reopened after PATH changes.
+settings-portable = Settings require a current-user installation.
+status-portable = Portable executable: no installation record.
+status-installed = Installation status:
+status-root = Installation directory
+status-version = Active version
+status-state = State
+status-programs = Program verification
+status-classic = Classic Explorer menu registered
+status-modern = Modern Explorer menu and identity verified
+status-package = Identity package
+status-publisher = Package publisher
+status-signed = Signed installation
+status-modern-supported = Windows 11 modern menu available
+status-path-owned = PATH entry owned by this installation
+status-cleanup = Files awaiting cleanup
+status-transaction = Unfinished maintenance transaction
+status-yes = Yes
+status-no = No
+status-not-applicable = Not applicable
+status-installing = Installing
+status-ready = Ready
+status-updating = Updating
+status-repair = Repair required
+status-removing = Removing
+status-removal-pending = Cleanup pending
+installer-language = Interface language
+installer-menus = Add classic Explorer menus and the Windows 11 modern menu
+installer-menus-classic = Add classic Explorer menus (under Show more options on Windows 11)
+installer-path = Add command-line tool to user PATH
+installer-user-path = Add the command-line tool to my PATH
+installer-language-title = Unlinka interface language
+installer-language-prompt = Choose the language for new menus and tasks.
+installer-language-auto = Follow Windows display language
+installer-maintenance-failed = Installation maintenance failed. Diagnostics are in %LocalAppData%\Unlinka\logs.
+installer-repair-first = Repair this installation before continuing.
+installer-removal-pending = File cleanup is pending. Close the relevant windows or sign out, then run uninstall again.
+diagnostic-invalid_path = The target path is invalid or unsupported.
+diagnostic-protected_path = This path is protected from deletion.
+diagnostic-recursive_required = Directory contents require --recursive.
+diagnostic-identity_changed = A target changed after confirmation. The entire selection was rejected.
+diagnostic-directory_changed = A directory changed during execution and could not be safely traversed.
+diagnostic-invalid_options = The deletion options are invalid.
+operation-delete = delete
+operation-open = open
+operation-scan = scan
+operation-prepare = prepare
+operation-schedule = schedule
+operation-open-directory = open directory
+operation-validate-protection = validate path protection
+operation-validate-target = validate target identity
+operation-options = validate options
+error-worker = The deletion worker stopped unexpectedly.
+maintenance-busy = A task is running. Wait for it to finish or cancel this maintenance operation.
+maintenance-pending = Cleanup is pending. Close the relevant windows or sign out, then run uninstall again.
+maintenance-uninstall-title = Uninstall Unlinka?
+maintenance-uninstall-content = Explorer menus, command-line integration, and installed programs will be removed. Allow running confirmation and deletion tasks to finish before continuing.
+maintenance-purge-settings = Also delete saved settings and diagnostic logs
+maintenance-uninstall-button = Uninstall
+maintenance-removal-pending = Some program files are still in use. Menus and PATH integration have been removed. Close the relevant windows or sign out, then run uninstall again to finish cleanup.
+maintenance-diagnostic-log = Diagnostic log: { $path }
+maintenance-wait-title = A Unlinka task is running
+maintenance-wait-content = Allow running confirmation and deletion tasks to finish, then retry. Cancelling leaves this maintenance operation unapplied.
+maintenance-retry = Retry
+maintenance-launcher-help = Unlinka: permanently delete Windows files and directories. Usage: unlinka [OPTIONS] PATH... Help is temporarily unavailable: { $reason }
+maintenance-launcher-version = Unlinka { $version }. Installation status: { $reason }
+maintenance-installation-missing = The current-user installation record is missing.
+maintenance-error = Maintenance failed: { $reason }
+maintenance-retained-files = Unlinka was uninstalled. Files outside the installation ownership list were preserved in { $path }; see retained diagnostic logs.

@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     PreparedTargets,
+    diagnostic::{DiagnosticCode, error},
     win::{Handle, Identity, Kind},
 };
 
@@ -17,9 +18,7 @@ pub(crate) struct PreparedEntry {
     pub snapshot: Handle,
 }
 
-fn invalid(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, message.into())
-}
+fn invalid(message: impl Into<String>) -> io::Error { error(DiagnosticCode::InvalidPath, message) }
 
 /// Reject special namespaces and stream syntax before any filesystem lookup.
 pub(crate) fn validate_syntax(path: &Path) -> io::Result<()> {
@@ -136,10 +135,10 @@ impl Protection {
                 .any(|protected| path_key(protected) == path_key(path))
             || self.identities.contains(&identity)
         {
-            return Err(invalid(format!(
-                "protected directory or ancestor: {}",
-                path.display()
-            )));
+            return Err(error(
+                DiagnosticCode::ProtectedPath,
+                format!("protected directory or ancestor: {}", path.display()),
+            ));
         }
         Ok(())
     }
@@ -157,10 +156,13 @@ pub(crate) fn pin_ancestors(path: &Path) -> io::Result<Vec<Handle>> {
     for ancestor in ancestors {
         let pin = Handle::open(ancestor, false, true)?;
         if pin.identity()?.kind != Kind::Directory {
-            return Err(invalid(format!(
-                "ancestor is not an ordinary directory: {}",
-                ancestor.display()
-            )));
+            return Err(error(
+                DiagnosticCode::DirectoryChanged,
+                format!(
+                    "ancestor is not an ordinary directory: {}",
+                    ancestor.display()
+                ),
+            ));
         }
         pins.push(pin);
     }
@@ -192,10 +194,13 @@ pub(crate) fn prepare(paths: &[PathBuf], recursive: bool) -> io::Result<Prepared
         validate_syntax(&path)?;
         protection.check(&path, identity)?;
         if identity.kind == Kind::Directory && !recursive {
-            return Err(invalid(format!(
-                "ordinary directory requires recursive mode: {}",
-                path.display()
-            )));
+            return Err(error(
+                DiagnosticCode::RecursiveRequired,
+                format!(
+                    "ordinary directory requires recursive mode: {}",
+                    path.display()
+                ),
+            ));
         }
         entries.push(PreparedEntry {
             path,

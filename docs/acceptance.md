@@ -2,7 +2,31 @@
 
 Local validation environment: Windows 11, NTFS on NVMe, PowerShell 7, and Rust 1.99 MSVC.
 
-## Results
+## Installer, Shell, and i18n implementation
+
+The workspace contains the current-user installer pipeline, classic/modern COM adapters, maintenance/launcher, native desktop tasks/settings, and English/Chinese Fluent resources. Packaging now uses one product identity and install location. The default unsigned installer is installable and supplies classic menus on Windows 10 and Windows 11's Show more options. Providing all three certificate signing arguments also builds the sparse MSIX and enables the modern Windows 11 menu when menus are enabled.
+
+Payload schema 1 records a `signed` boolean. Signed payloads require signature validation; both modes retain SHA-256 checks, request ACLs, installation leases, ownership checks, and transaction recovery. Unsigned payloads contain neither an MSIX nor an embedded desktop package identity. Output paths and Setup names are identical across signing modes, and existing package versions cannot be overwritten.
+
+Source validation passed: workspace/all-target compilation in both unsigned and signed-metadata configurations, Rusteward formatting and strict lint, and all 66 pure unit tests. The signed-metadata check compiled the package-identity branch without using a certificate.
+
+The default unsigned release installer was built as `target/packages/0.1.0.6/Unlinka-Setup-0.1.0.6-x64.exe` (3,351,234 bytes; SHA-256 `3740ef5f2cfac235e17eca9ed13e809a27ebe9e591f4bd8fa0d13bc332871557`). All 71 payload inventory hashes matched. Metadata records `signed: false` and an empty Publisher; no MSIX was generated. The five application binaries and Setup report `NotSigned` and product version `0.1.0.6`. Extraction of the desktop executable's embedded manifest confirmed no MSIX identity and retained Common Controls. The packaged CLI's Chinese help also ran successfully.
+
+Certificate-backed signing has not been exercised with a certificate. No product installer, package registration, Explorer action, native UI, actual deletion, or benchmark was executed for these changes. The existing CI deletion test definitions remain opt-in locally and use deterministic English or stable JSON output.
+
+Real Win10/Win11 menu behavior, package identity/deployment, installer selections, settings dialogs, busy-task maintenance, cross-version rollback, crash recovery, and occupied-DLL uninstall retry still require Windows acceptance. Do not infer these results from pure unit tests or the historical deletion results below. Rust 1.85 has not been validated locally.
+
+Use disposable Windows test environments for the unified installation identity:
+
+- Confirm an unsigned fresh install succeeds without a certificate, creates no identity package, and provides one classic entry on Win10 and under Show more options on Win11.
+- Confirm a signed build retains the classic entry and adds one modern entry on Win11; check exact Publisher, package version, architecture, and external location.
+- Test mixed selections, raw UTF-16/long paths, shortcuts, and reparse points; test both languages, default cancellation, progress cancellation, changed targets, and partial failures using disposable fixtures.
+- Exercise retained settings, same-version repair, cross-version upgrades in both signing directions, package failure rollback, interrupted maintenance, external PATH/registry changes, and preserved unknown files.
+- Cancel both uninstall confirmations before cleanup; retain the uninstall entry on pending removal, release occupied DLLs, and retry successfully.
+
+## Historical deletion-engine results
+
+The following results predate the installer/Shell/i18n changes and were not rerun for this implementation.
 
 | Check                | Status                                                                                                                             |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |

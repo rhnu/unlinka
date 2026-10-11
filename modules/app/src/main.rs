@@ -1,7 +1,10 @@
 mod cli;
 mod confirm;
+mod result;
+mod status;
 
 use std::{
+    io::Write,
     process::ExitCode,
     sync::{
         Arc,
@@ -9,102 +12,270 @@ use std::{
     },
 };
 
-use clap::Parser;
-use unlinka_core::{DeleteOptions, DeleteReport, execute, prepare};
+use clap::{
+    FromArgMatches,
+    error::{ContextKind, ErrorKind},
+};
+use unlinka_core::{DeleteOptions, DeleteReport, PreparedTargets, execute, prepare};
+use unlinka_i18n::{FluentValue, Translator, select_locale, windows_languages};
+use unlinka_integration::{AppLease, read_settings};
 
-use crate::cli::{Cli, Confirmation, ExitStatus};
+use crate::{
+    cli::{Cli, Confirmation, ExitStatus},
+    result::ResultDocument,
+};
 
 fn main() -> ExitCode {
-    let cli = match Cli::try_parse() {
+    let arguments: Vec<_> = std::env::args_os().collect();
+    let (explicit, json) = cli::bootstrap(&arguments);
+    let environment = std::env::var("UNLINKA_LANG").ok();
+    let settings = read_settings().ok();
+    let translator = Translator::new(select_locale(
+        explicit.as_deref(),
+        environment.as_deref(),
+        settings.as_ref().map(|settings| settings.language.as_str()),
+        &windows_languages(),
+    ));
+    let mut command = cli::command(&translator);
+    if arguments
+        .iter()
+        .skip(1)
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let status = if command.print_long_help().is_ok() {
+            println!();
+            ExitStatus::Success
+        } else {
+            ExitStatus::ExecutionFailed
+        };
+        return ExitCode::from(status as u8);
+    }
+    if arguments
+        .iter()
+        .skip(1)
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("unlinka {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+    let cli = match command
+        .try_get_matches_from(arguments)
+        .and_then(|matches| Cli::from_arg_matches(&matches))
+    {
         Ok(cli) => cli,
         Err(error) => {
-            let code = u8::try_from(error.exit_code())
-                .expect("clap uses only exit code 0 for help or 2 for invalid input");
-            if error.print().is_err() {
-                return ExitCode::from(ExitStatus::ExecutionFailed as u8);
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) {
+                return ExitCode::from(u8::from(error.print().is_err()));
             }
-            return ExitCode::from(code);
+            let argument = error
+                .get(ContextKind::InvalidArg)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let value = error
+                .get(ContextKind::InvalidValue)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let message = match error.kind() {
+                ErrorKind::UnknownArgument => "error-unknown",
+                ErrorKind::MissingRequiredArgument => "error-missing",
+                ErrorKind::InvalidValue
+                | ErrorKind::ValueValidation
+                | ErrorKind::TooFewValues
+                | ErrorKind::TooManyValues => "error-value",
+                ErrorKind::ArgumentConflict => "error-conflict",
+                _ => "error-arguments",
+            };
+            eprintln!(
+                "[invalid_arguments] {}\n{}",
+                translator.format(
+                    message,
+                    &[
+                        ("argument", argument.as_str().into()),
+                        ("value", value.as_str().into())
+                    ]
+                ),
+                translator.text("error-hint")
+            );
+            let mut document = ResultDocument::new(ExitStatus::InvalidInput, false, &[]);
+            document.diagnostic("invalid_arguments", "parse_arguments", None, None);
+            return ExitCode::from(finish(&document, json) as u8);
         },
     };
-    ExitCode::from(run(&cli) as u8)
+    ExitCode::from(complete(&cli, &translator) as u8)
 }
 
-/// Prepare all targets before confirmation; no mutation occurs until execution.
-fn run(cli: &Cli) -> ExitStatus {
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let interrupt_flag = Arc::clone(&cancelled);
-    if let Err(error) = ctrlc::set_handler(move || {
-        interrupt_flag.store(true, Ordering::Relaxed);
-    }) {
-        eprintln!("error: cannot install Ctrl+C cancellation handler: {error}");
-        return ExitStatus::ExecutionFailed;
+/// Retains the installed activity lease until final stdout output has returned.
+fn complete(cli: &Cli, tr: &Translator) -> ExitStatus {
+    if cli.integration_status {
+        return finish(&run(cli, tr), cli.json);
     }
+    let _lease = match AppLease::acquire_if_installed() {
+        Ok(lease) => lease,
+        Err(error) => {
+            return finish(
+                &failed(
+                    cli,
+                    tr,
+                    ExitStatus::ExecutionFailed,
+                    "installation_unavailable",
+                    "error-installation",
+                    "acquire_lease",
+                    &error,
+                ),
+                cli.json,
+            );
+        },
+    };
+    finish(&run(cli, tr), cli.json)
+}
 
+fn finish(document: &ResultDocument, json: bool) -> ExitStatus {
+    if json {
+        let stdout = std::io::stdout();
+        let mut writer = stdout.lock();
+        if serde_json::to_writer(&mut writer, document).is_err() || writeln!(writer).is_err() {
+            return ExitStatus::ExecutionFailed;
+        }
+    }
+    document.status()
+}
+
+fn run(cli: &Cli, tr: &Translator) -> ResultDocument {
+    if cli.integration_status {
+        return match unlinka_integration::maintenance::integration_status() {
+            Ok(value) => {
+                if !cli.json {
+                    println!("{}", status::format(tr, &value));
+                }
+                let mut document = ResultDocument::new(ExitStatus::Success, false, &[]);
+                document.integration = Some(value);
+                document
+            },
+            Err(error) => failed(
+                cli,
+                tr,
+                ExitStatus::ExecutionFailed,
+                "integration_status_failed",
+                "error-installation",
+                "integration_status",
+                &error,
+            ),
+        };
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let signal = Arc::clone(&cancelled);
+    if let Err(error) = ctrlc::set_handler(move || signal.store(true, Ordering::Relaxed)) {
+        eprintln!(
+            "[cancellation_handler_failed] {}: {error}",
+            tr.text("error-interrupt")
+        );
+        let mut document =
+            ResultDocument::new(ExitStatus::ExecutionFailed, cli.dry_run, &cli.paths);
+        document.diagnostic(
+            "cancellation_handler_failed",
+            "install_signal_handler",
+            None,
+            None,
+        );
+        return document;
+    }
     if cli.verbose > 0 {
-        eprintln!("Preparing {} supplied path(s).", cli.paths.len());
+        eprintln!("{}", tr.count("preparing", cli.paths.len() as u64));
     }
     let targets = match prepare(&cli.paths, cli.recursive) {
         Ok(targets) => targets,
         Err(error) => {
             if cancelled.load(Ordering::Relaxed) {
-                return cancelled_before_execution();
+                return cancelled_before_execution(cli, tr);
             }
-            eprintln!("error: target preparation failed: {error}");
-            eprintln!("Supplied paths:");
+            eprintln!("{}", tr.text("supplied-paths"));
             for path in &cli.paths {
                 eprintln!("  {}", path.display());
             }
-            return ExitStatus::InvalidInput;
+            return failed(
+                cli,
+                tr,
+                ExitStatus::InvalidInput,
+                unlinka_core::diagnostic_code(&error).as_str(),
+                "error-prepare",
+                "prepare",
+                &error,
+            );
         },
     };
-
     if cancelled.load(Ordering::Relaxed) {
-        return cancelled_before_execution();
+        return cancelled_before_execution(cli, tr);
     }
+    execute_prepared(cli, tr, targets, &cancelled)
+}
 
+fn execute_prepared(
+    cli: &Cli,
+    tr: &Translator,
+    targets: PreparedTargets,
+    cancelled: &AtomicBool,
+) -> ResultDocument {
     if cli.verbose > 0 {
-        eprintln!(
-            "Prepared {} top-level target(s) after normalization and overlap removal.",
-            targets.paths().len()
-        );
+        eprintln!("{}", tr.count("prepared", targets.paths().len() as u64));
     }
-
     if cli.dry_run {
-        eprintln!("Dry run: no items will be deleted. Top-level targets:");
+        eprintln!("{}", tr.text("dry-run"));
         for path in targets.paths() {
             eprintln!("  {}", path.display());
         }
     } else {
-        eprintln!("Permanent deletion: items do not enter the Recycle Bin.");
+        eprintln!("{}", tr.text("permanent-warning"));
         if !cli.yes {
-            let confirmed = match cli.confirmation() {
-                Confirmation::Native => confirm::native(targets.paths()),
-                Confirmation::Console => confirm::console(targets.paths()),
+            let confirmation = match cli.confirmation() {
+                Confirmation::Native => confirm::native(targets.paths(), tr),
+                Confirmation::Console => confirm::console(targets.paths(), tr),
             };
-            match confirmed {
+            match confirmation {
                 Ok(true) => {},
-                Ok(false) => return cancelled_before_execution(),
+                Ok(false) => return cancelled_before_execution(cli, tr),
                 Err(error) => {
                     if cancelled.load(Ordering::Relaxed) {
-                        return cancelled_before_execution();
+                        return cancelled_before_execution(cli, tr);
                     }
-                    eprintln!("error: confirmation failed: {error}");
-                    return ExitStatus::ConfirmationFailed;
+                    return failed(
+                        cli,
+                        tr,
+                        ExitStatus::ConfirmationFailed,
+                        "confirmation_failed",
+                        "error-confirm",
+                        "confirm",
+                        &error,
+                    );
                 },
             }
         }
     }
-
-    // A signal may arrive while the native or console confirmation is open.
     if cancelled.load(Ordering::Relaxed) {
-        return cancelled_before_execution();
+        return cancelled_before_execution(cli, tr);
     }
-
     eprintln!(
-        "Starting {} for {} top-level target(s) with a total thread budget of {} (including scanning).",
-        if cli.dry_run { "scan" } else { "deletion" },
-        targets.paths().len(),
-        cli.threads
+        "{}",
+        tr.format(
+            "starting",
+            &[
+                (
+                    "mode",
+                    tr.text(if cli.dry_run {
+                        "mode-scan"
+                    } else {
+                        "mode-delete"
+                    })
+                    .into()
+                ),
+                ("count", FluentValue::from(targets.paths().len())),
+                ("threads", FluentValue::from(cli.threads))
+            ]
+        )
     );
     let report = execute(
         targets,
@@ -113,66 +284,99 @@ fn run(cli: &Cli) -> ExitStatus {
             threads: cli.threads,
             dry_run: cli.dry_run,
         },
-        &cancelled,
+        cancelled,
     );
-    print_report(&report, cli.dry_run);
-    ExitStatus::for_outcome(
-        report.cancelled || cancelled.load(Ordering::Relaxed),
-        report.failed,
+    print_report(&report, cli.dry_run, tr);
+    ResultDocument::from_report(
+        &report,
+        cli.dry_run,
+        &cli.paths,
+        cancelled.load(Ordering::Relaxed),
     )
 }
 
-fn cancelled_before_execution() -> ExitStatus {
-    eprintln!("Cancelled. No targets were deleted.");
-    ExitStatus::Cancelled
+fn failed(
+    cli: &Cli,
+    tr: &Translator,
+    status: ExitStatus,
+    code: &str,
+    message: &str,
+    operation: &str,
+    error: &std::io::Error,
+) -> ResultDocument {
+    let detail = core_error(tr, error);
+    eprintln!("[{code}] {}: {detail}", tr.text(message));
+    let mut document = ResultDocument::new(status, cli.dry_run, &cli.paths);
+    document.diagnostic(code, operation, None, error.raw_os_error());
+    document
 }
 
-fn print_report(report: &DeleteReport, dry_run: bool) {
-    if dry_run {
-        eprintln!(
-            "Dry-run scan {} in {:.3}s: {} file(s), {} directory/directories, {} link(s), {} failure(s). Nothing was deleted.",
-            if report.cancelled {
-                "cancelled"
-            } else {
-                "finished"
-            },
-            report.elapsed.as_secs_f64(),
-            report.files,
-            report.directories,
-            report.links,
-            report.failed
-        );
-        eprintln!(
-            "Counts cover the scanned targets and, with --recursive, their contents. Links are counted separately; link targets are not scanned."
-        );
+fn core_error(tr: &Translator, error: &std::io::Error) -> String {
+    let code = unlinka_core::diagnostic_code(error).as_str();
+    if code == "system" {
+        error.to_string()
     } else {
-        eprintln!(
-            "Deletion {} in {:.3}s: {} file(s), {} directory/directories, {} link(s) deleted; {} failure(s).",
-            if report.cancelled {
-                "cancelled"
-            } else {
-                "finished"
-            },
-            report.elapsed.as_secs_f64(),
-            report.files,
-            report.directories,
-            report.links,
-            report.failed
-        );
+        tr.text(&format!("diagnostic-{code}"))
     }
+}
 
-    for failure in report.failures.iter().take(100) {
+fn cancelled_before_execution(cli: &Cli, tr: &Translator) -> ResultDocument {
+    eprintln!("{}", tr.text("cancelled-before"));
+    let mut document = ResultDocument::new(ExitStatus::Cancelled, cli.dry_run, &cli.paths);
+    document.diagnostic("cancelled", "confirm", None, None);
+    document
+}
+
+fn print_report(report: &DeleteReport, dry_run: bool, tr: &Translator) {
+    eprintln!(
+        "{}",
+        tr.format(
+            "report",
+            &[
+                (
+                    "mode",
+                    tr.text(if dry_run { "mode-scan" } else { "mode-delete" })
+                        .into()
+                ),
+                (
+                    "state",
+                    tr.text(if report.cancelled {
+                        "state-cancelled"
+                    } else {
+                        "state-finished"
+                    })
+                    .into()
+                ),
+                (
+                    "seconds",
+                    format!("{:.3}", report.elapsed.as_secs_f64()).into()
+                ),
+                ("files", report.files.into()),
+                ("directories", report.directories.into()),
+                ("links", report.links.into()),
+                ("failed", report.failed.into())
+            ]
+        )
+    );
+    if dry_run {
+        eprintln!("{}", tr.text("dry-run-note"));
+    }
+    for failure in &report.failures {
         eprintln!(
-            "error: {} '{}': {}",
-            failure.operation,
-            failure.path.display(),
-            failure.error
+            "[{}] {}",
+            unlinka_core::diagnostic_code(&failure.error).as_str(),
+            tr.format(
+                "failure",
+                &[
+                    ("operation", tr.operation(failure.operation).into()),
+                    ("path", failure.path.to_string_lossy().as_ref().into()),
+                    ("message", core_error(tr, &failure.error).into())
+                ]
+            )
         );
     }
-    let omitted = report.failed.saturating_sub(
-        u64::try_from(report.failures.len().min(100)).expect("at most 100 failures are displayed"),
-    );
+    let omitted = report.failed.saturating_sub(report.failures.len() as u64);
     if omitted > 0 {
-        eprintln!("{omitted} additional failure(s) omitted.");
+        eprintln!("{}", tr.count("failures-omitted", omitted));
     }
 }

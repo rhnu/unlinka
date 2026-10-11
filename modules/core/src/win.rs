@@ -26,6 +26,8 @@ use windows_sys::Win32::{
     System::SystemInformation::GetWindowsDirectoryW,
 };
 
+use crate::diagnostic::{DiagnosticCode, error};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Kind {
     File,
@@ -142,7 +144,8 @@ impl Handle {
 
     pub fn require_directory(&self) -> io::Result<()> {
         if self.kind()? != Kind::Directory {
-            return Err(io::Error::other(
+            return Err(error(
+                DiagnosticCode::DirectoryChanged,
                 "pinned directory is no longer an ordinary directory",
             ));
         }

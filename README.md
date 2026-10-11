@@ -2,16 +2,36 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A fast Windows deletion tool with a CLI and native Windows confirmation dialog. Unlinka supports permanent deletion, console confirmation, scan previews, bounded concurrency, cancellation, and failure summaries.
+A fast Windows deletion tool with a bilingual CLI, native task dialogs, and Explorer context menus. Unlinka supports permanent deletion, console confirmation, scan previews, bounded concurrency, cancellation, and failure summaries.
 
 Deletion bypasses the Recycle Bin. Cancellation stops work that has not started; it cannot restore items already deleted.
 
+## Installation
+
+The x64 current-user installer targets Windows 10/11 without administrator privileges. The default unsigned build installs the classic Explorer menu: directly on Windows 10 and under **Show more options** on Windows 11. Menus and user PATH are enabled by default. A build signed with a trusted certificate also enables the Windows 11 modern menu. The fixed installation root is `%LocalAppData%\Programs\Unlinka`; the Start menu shortcut opens language, menu, and PATH settings. Menu actions always open a confirmation dialog, then show progress, cancellation, and results.
+
+Installer, repair, upgrade, and uninstall code is implemented. Unsigned builds are installable and contain no MSIX or desktop package identity. Signed and unsigned builds share the same product identity and installation. Certificate-backed signing and real Windows lifecycle/menu acceptance remain pending. See [integration and packaging](docs/windows-integration.md) for signing options and remaining validation.
+
+Build the default installer with Rust MSVC, Windows SDK x64 build tools, and Inno Setup 7.1:
+
+```powershell
+cargo xtask pack --build-number 1 --iscc "C:\Tools\Inno\ISCC.exe"
+```
+
+Outputs are immutable under `target/packages/<four-part-version>`; use a new build number for each package. Setup is named `Unlinka-Setup-<four-part-version>-x64.exe` for both signing modes. To enable signing, supply `--publisher`, `--certificate-thumbprint`, and `--timestamp-url` together; Publisher must exactly match the certificate Subject. The payload's `unlinka.exe` also runs as a portable CLI. Installed upgrades preserve settings and retain the preceding payload for rollback. Uninstall preserves preferences and logs unless selected otherwise; occupied DLLs leave a reported pending state and a usable uninstall entry for retry.
+
 ## Usage
 
-The examples below assume `unlinka` is available on your `PATH`. Unlinka targets Windows 10/11 and requires no administrator privileges or additional GUI runtime. An installer and an Explorer context-menu entry are not currently provided.
+The examples below assume `unlinka` is available on your `PATH`. No additional GUI runtime is required.
 
 ```powershell
 unlinka --help
+
+# Localized help; auto follows Windows display-language preferences
+unlinka --lang zh-CN --help
+
+# Query installation health without starting deletion
+unlinka --integration-status --json
 
 # Show the native Windows confirmation dialog; Cancel is the default button
 unlinka -r .\node_modules
@@ -25,6 +45,9 @@ unlinka -r --yes .\node_modules
 # Scan and count without modifying the target or requesting confirmation
 unlinka -r --dry-run .\node_modules
 
+# Language-independent, versioned JSON for scripts; confirmation rules still apply
+unlinka -r --yes --json .\node_modules
+
 # Delete multiple targets; the thread budget includes the scanner
 unlinka -r --threads 8 .\one .\two
 
@@ -37,6 +60,8 @@ Ordinary directories require `-r`. Symbolic links, junctions, and other reparse 
 If native confirmation fails, Unlinka reports an error. Select `--confirm console` explicitly to use terminal confirmation. Console mode requires interactive stdin and stderr, and an empty answer rejects deletion. `--yes` cannot be combined with an explicit `--confirm`.
 
 Results and diagnostics go to stderr. Normal runs count successfully deleted files, directories, and link entries; dry runs count candidates discovered during scanning. The summary reports elapsed time and the total number of failures, with details for at most 100 failures. Press Ctrl+C to cancel execution; items already deleted cannot be recovered by Unlinka.
+
+Language selection is `--lang` → `UNLINKA_LANG` → saved preference → Windows display languages → English. Supported values are `auto`, `zh-CN`, and `en-US`. JSON results use schema version 1, stable diagnostic codes, numeric counts, and raw UTF-16 path arrays; final non-help results write one document to stdout. `--integration-status` is incompatible with deletion arguments.
 
 | Exit code | Meaning                                                                |
 | --------- | ---------------------------------------------------------------------- |
@@ -52,9 +77,10 @@ Unlinka does not change read-only attributes, elevate privileges, or terminate p
 
 Preflight records target identities, which are checked again by reopening the targets before execution. During scanning, directory handles restrict ordinary writes and renames, and directory types are revalidated; sharing conflicts are reported rather than ignored. Newly created files can cause a directory-not-empty failure. If a file is replaced before it is opened, the replacement at the same path may still be deleted. Leaf entries are deleted through open handles, so an already selected object is still processed if another process subsequently moves it outside the selected directory. Attribute-only changes to reparse points still have a race window between validation and opening. Unlinka does not provide isolation against malicious concurrent changes.
 
-Unlinka does not include Recycle Bin deletion, a context menu, exact percentage progress, automatic retries, handling of blocking processes, or a mode that empties a directory while retaining it. Its main optimization target is large numbers of small files on local NTFS volumes. Other file systems and network paths have not been validated. The native dialog uses the system task dialog and may differ from Explorer's layout across Windows versions.
+Unlinka does not include Recycle Bin deletion, exact percentage progress, automatic deletion retries, handling of blocking processes, or a mode that empties a directory while retaining it. Shell integration targets native x64 Explorer; ARM64/x86 and directory-background menus are outside this release. Its main optimization target is large numbers of small files on local NTFS volumes. Other file systems and network paths have not been validated. The native dialog uses the system task dialog and may differ from Explorer's layout across Windows versions.
 
 ## Documentation
 
 - [Architecture and development](docs/architecture.md): module responsibilities, deletion constraints, native confirmation, dependencies, and source checks.
 - [Acceptance status](docs/acceptance.md): current results, verification gaps, benchmarks, and validation commands.
+- [Windows integration and i18n](docs/windows-integration.md) (Chinese): implemented installation layout, modern and classic registration, lifecycle recovery, packaging, and remaining acceptance.

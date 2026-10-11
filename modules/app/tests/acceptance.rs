@@ -432,7 +432,7 @@ fn failure_total_and_first_hundred() {
                     .count(),
                 100
             );
-            assert!(text.contains("51 additional failure(s) omitted"));
+            assert!(text.contains("51 additional failures omitted"));
         } else {
             let report = engine(std::slice::from_ref(&target), 8, false);
             assert_report(&report, 0, 0, 0, 151);

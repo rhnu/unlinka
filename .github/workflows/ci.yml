@@ -25,6 +25,23 @@ jobs:
         run: cargo dev lint --locked
       - name: Run unit tests
         run: cargo test --workspace --lib --bins --locked
+      - name: Check SVG-derived icon resources
+        run: cargo xtask assets --check
+      - name: Prepare portable Inno Setup compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $installer
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Pyrsys B.V.') {
+            throw 'Inno Setup compiler signature verification failed'
+          }
+          $compilerRoot = Join-Path $env:RUNNER_TEMP 'inno'
+          Start-Process -FilePath $installer -ArgumentList '/PORTABLE=1', '/VERYSILENT', '/CURRENTUSER', '/NOICONS', '/NORESTART', ('/DIR="' + $compilerRoot + '"') -WindowStyle Hidden -Wait
+          "UNLINKA_ISCC=$compilerRoot\ISCC.exe" >> $env:GITHUB_ENV
+      - name: Build default unsigned installer
+        run: cargo xtask pack
       - name: Run deletion acceptance tests
         run: cargo test -p unlinka --test acceptance --release --locked -- --ignored --test-threads=1 --nocapture
       - name: Run console cancellation tests

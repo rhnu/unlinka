@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Unlinka</title>
+  <desc>Two open geometric links separated by a diagonal break.</desc>
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="#000" />
+  <g transform="rotate(-45 128 128)" fill="none" stroke="#fff" stroke-width="20" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M108 96H64V160H108" />
+    <path d="M148 96H192V160H148" />
+  </g>
+</svg>

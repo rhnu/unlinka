@@ -11,11 +11,14 @@
 //! impose semantics beyond the local sharing guarantees.
 #![cfg(windows)]
 
+mod diagnostic;
 mod engine;
 mod paths;
 mod win;
 
 use std::{io, path::PathBuf, sync::atomic::AtomicBool, time::Duration};
+
+pub use diagnostic::{DiagnosticCode, diagnostic_code};
 
 /// Options shared by CLI and GUI callers.
 #[derive(Debug, Clone)]
@@ -56,6 +59,16 @@ pub struct DeleteReport {
     pub elapsed: Duration,
 }
 
+/// A completed-operation snapshot; total work is intentionally unknown while scanning.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Progress {
+    pub files: u64,
+    pub directories: u64,
+    pub links: u64,
+    pub failed: u64,
+    pub elapsed: Duration,
+}
+
 impl DeleteReport {
     fn fail(&mut self, path: PathBuf, operation: &'static str, error: io::Error) {
         self.failed += 1;
@@ -92,7 +105,19 @@ pub fn execute(
     options: &DeleteOptions,
     cancelled: &AtomicBool,
 ) -> DeleteReport {
-    engine::execute(targets, options, cancelled)
+    engine::execute(targets, options, cancelled, None)
+}
+
+/// Execute with coalesced progress callbacks, invoked without holding engine locks.
+/// The callback runs on a monitor thread at most ten times per second and must
+/// return promptly. The final report remains authoritative, including cancellation.
+pub fn execute_with_progress(
+    targets: PreparedTargets,
+    options: &DeleteOptions,
+    cancelled: &AtomicBool,
+    observer: &(dyn Fn(Progress) + Sync),
+) -> DeleteReport {
+    engine::execute(targets, options, cancelled, Some(observer))
 }
 
 #[cfg(test)]

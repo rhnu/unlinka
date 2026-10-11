@@ -1,0 +1,14 @@
+[package]
+name = "unlinka-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+unlinka-core.workspace = true
+unlinka-i18n.workspace = true
+unlinka-integration.workspace = true
+windows.workspace = true
+unicode-segmentation.workspace = true

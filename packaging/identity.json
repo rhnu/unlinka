@@ -1,0 +1,9 @@
+{
+  "app_id": "6C273E32-2E9B-450A-A683-4AED2D9D6A04",
+  "classic_clsid": "3830A560-FF20-4D90-8B90-BEEF4A7AE496",
+  "modern_clsid": "6842E106-7F2C-48CF-8F0A-DD54D36D9BA1",
+  "action_guid": "E792E7B0-7A60-46A4-92C6-327B24915404",
+  "package_name": "Unlinka.ShellIntegration",
+  "application_id": "UnlinkaDesktop",
+  "install_name": "Unlinka"
+}

@@ -118,7 +118,7 @@ fn cancellation_case(
         0
     };
     if exit != 3
-        || !text.contains("Deletion cancelled")
+        || !text.to_ascii_lowercase().contains("deletion cancelled")
         || remaining == 0
         || remaining >= FILES
         || report.files != u64::try_from(FILES - remaining).expect("6000 file count fits a u64")
@@ -219,7 +219,7 @@ impl Child {
         // Windows paths cannot contain quotes; arguments end in .exe/target,
         // so quoted path arguments have no trailing backslash ambiguity.
         let mut command: Vec<_> = format!(
-            "\"{}\" -r -y --threads {threads} -- \"{}\"",
+            "\"{}\" --lang en-US -r -y --threads {threads} -- \"{}\"",
             binary.display(),
             target.display()
         )
