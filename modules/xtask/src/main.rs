@@ -25,7 +25,7 @@ enum Task {
         #[arg(long)]
         check: bool,
     },
-    /// Build a current-user x64 installer; signing also enables the Windows 11 menu.
+    /// Build a current-user x64 installer with an automatically cached Inno compiler.
     Pack {
         /// Certificate Subject; omit all signing options for an unsigned installer.
         #[arg(long, requires_all = ["certificate_thumbprint", "timestamp_url"])]
@@ -38,8 +38,6 @@ enum Task {
         timestamp_url: Option<String>,
         #[arg(long, default_value_t = 0)]
         build_number: u16,
-        #[arg(long)]
-        iscc: Option<std::path::PathBuf>,
         #[arg(long)]
         sdk_bin: Option<std::path::PathBuf>,
     },
@@ -68,14 +66,12 @@ fn main() -> ExitCode {
             certificate_thumbprint,
             timestamp_url,
             build_number,
-            iscc,
             sdk_bin,
         } => packaging::run(&packaging::Options {
             publisher,
             certificate_thumbprint,
             timestamp_url,
             build_number,
-            iscc,
             sdk_bin,
         }),
         #[cfg(windows)]

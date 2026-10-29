@@ -4,39 +4,15 @@ use super::{
     Artifact, INSTALL_KEY, Installation, InstallationState, OpenOptions, OpenOptionsExt, Ownership,
     Path, RegistryChange, Settings, Transaction, Value, check_file, check_no_reparse,
     cleanup_artifacts, compensation, copy_file, file_identity, fs, guid, hash, hash_reader,
-    invalid, io, move_file, notify, owned_payload, package, path_present, read_json, registry,
-    relative, remove_internal_file, remove_owned, request, rollback_path, save_json, settings,
+    invalid, io, move_file, notify, path_present, read_json, registry, relative,
+    remove_internal_file, remove_owned, request, rollback_path, save_json, settings,
     validate_owned_path, validate_ownership, validate_registry_key,
 };
 
 pub(super) fn rollback(root: &Path, tx: &Transaction) -> io::Result<()> {
     let mut recovery = tx.clone();
     let mut failures = Vec::new();
-    let mut package_removed = true;
-    if tx.package_touched
-        && let Err(error) =
-            rollback_package_publisher(tx).and_then(|publisher| package::remove(publisher, root))
-    {
-        package_removed = false;
-        failures.push(error.to_string());
-    }
-    // Never remove an external-location payload while its package remains registered.
-    if package_removed {
-        rollback_files(root, tx, &mut recovery, &mut failures);
-    }
-    if tx.package_touched && package_removed {
-        let result = (|| {
-            if let Some(version) = &tx.before.package_version {
-                let directory = root.join("versions").join(version);
-                owned_payload(root, version, &tx.before)?;
-                package::add(&tx.before.publisher, version, &directory, root)?;
-            }
-            Ok::<_, io::Error>(())
-        })();
-        if let Err(error) = result {
-            failures.push(error.to_string());
-        }
-    }
+    rollback_files(root, tx, &mut recovery, &mut failures);
     for change in tx.path.iter().rev() {
         if let Err(error) = rollback_path(change) {
             failures.push(error.to_string());
@@ -58,7 +34,7 @@ pub(super) fn rollback(root: &Path, tx: &Transaction) -> io::Result<()> {
         }
     }
     // Keep compensating backups until all restorations succeed so a later
-    // recovery can retry package removal or file restoration without data loss.
+    // recovery can retry file restoration without data loss.
     if failures.is_empty()
         && let Err(error) = cleanup_artifacts(root, &recovery)
     {
@@ -106,18 +82,6 @@ pub(super) fn rollback(root: &Path, tx: &Transaction) -> io::Result<()> {
             failures.join("; ")
         )))
     }
-}
-
-pub(super) fn rollback_package_publisher(tx: &Transaction) -> io::Result<&str> {
-    let ownership = if tx.after.signed {
-        &tx.after
-    } else {
-        &tx.before
-    };
-    if !ownership.signed || ownership.publisher.is_empty() {
-        return Err(invalid("package rollback has no signed ownership policy"));
-    }
-    Ok(&ownership.publisher)
 }
 
 pub(super) fn recover(root: &Path) -> io::Result<()> {
@@ -170,7 +134,7 @@ pub(super) fn begin(
         registry: Vec::new(),
         files: Vec::new(),
         path: Vec::new(),
-        package_touched: false,
+        _legacy_package_touched: (),
         artifacts: Vec::new(),
     };
     tx.save(root)?;
@@ -198,16 +162,6 @@ pub(super) fn commit(
                 return Err(invalid("classic registration verification failed"));
             }
         }
-        if tx.after.signed
-            && package::modern_supported()?
-            && !package::verify(
-                &tx.after.publisher,
-                version,
-                &root.join("versions").join(version),
-            )?
-        {
-            return Err(invalid("modern registration verification failed"));
-        }
     }
     if settings_value.path_enabled && !path_present(root)? {
         return Err(invalid("PATH verification failed"));
@@ -219,18 +173,10 @@ pub(super) fn commit(
         "ActiveVersion",
         Some(Value::string(version)),
     )?;
-    tx.write(
-        root,
-        INSTALL_KEY,
-        "PackagePublisher",
-        Some(Value::string(tx.after.publisher.clone())),
-    )?;
-    tx.write(
-        root,
-        INSTALL_KEY,
-        "PackageName",
-        Some(Value::string(crate::PACKAGE_NAME)),
-    )?;
+    // Remove obsolete metadata also present in existing unsigned installations.
+    for name in ["PackagePublisher", "PackageName"] {
+        tx.write(root, INSTALL_KEY, name, None)?;
+    }
     tx.write(
         root,
         INSTALL_KEY,

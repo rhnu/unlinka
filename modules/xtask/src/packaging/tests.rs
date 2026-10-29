@@ -6,7 +6,6 @@ fn options() -> Options {
         certificate_thumbprint: None,
         timestamp_url: None,
         build_number: 0,
-        iscc: None,
         sdk_bin: None,
     }
 }
@@ -55,12 +54,4 @@ fn version_components_are_bounded_and_prereleases_rejected() {
     assert_eq!(package_version("2.7.3", 12).unwrap(), "2.7.3.12");
     assert!(package_version("1.0.0-beta", 0).is_err());
     assert!(package_version("70000.0.0", 0).is_err());
-}
-
-#[test]
-fn manifest_attributes_escape_publisher_distinguished_name() {
-    assert_eq!(
-        xml("CN=A&B, O=\"Example\""),
-        "CN=A&amp;B, O=&quot;Example&quot;"
-    );
 }

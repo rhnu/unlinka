@@ -3,14 +3,12 @@ use std::os::windows::process::CommandExt;
 use super::{
     BTreeMap, Command, File, Installation, OpenOptions, OpenOptionsExt, OsStrExt, OsString, Path,
     PathBuf, Write, check_no_reparse, copy_file, fs, guid, hash, invalid, io, load_ownership,
-    package, path_present, read_json, read_settings, registry, request, save_json, security,
+    path_present, read_json, read_settings, registry, request, save_json, security,
 };
 
 /// # Errors
-/// Fails if COM initialization, installation metadata, registry queries or package
-/// deployment status cannot be read or validated.
+/// Fails if installation metadata or registry queries cannot be read or validated.
 pub fn integration_status() -> io::Result<serde_json::Value> {
-    let _apartment = Apartment::new()?;
     let Some(installation) = Installation::current()? else {
         return Ok(serde_json::json!({"installed":false,"state":"Portable"}));
     };
@@ -24,16 +22,6 @@ pub fn integration_status() -> io::Result<serde_json::Value> {
         .into_iter()
         .all(|ok| ok)
         && !owned.registry.is_empty();
-    let modern_supported = owned.signed && package::modern_supported()?;
-    let package = if modern_supported && settings.menus_enabled {
-        Some(package::verify(
-            &owned.publisher,
-            &installation.active_version,
-            &installation.active_dir(),
-        )?)
-    } else {
-        None
-    };
     let programs = ["unlinka.exe", "unlinka-desktop.exe", "unlinka-shell.dll"]
         .into_iter()
         .map(|name| {
@@ -45,7 +33,7 @@ pub fn integration_status() -> io::Result<serde_json::Value> {
         })
         .collect::<BTreeMap<_, _>>();
     Ok(
-        serde_json::json!({"installed":true,"root_display":installation.root.to_string_lossy(),"root_utf16":installation.root.as_os_str().encode_wide().collect::<Vec<_>>(),"active_version":installation.active_version,"state":installation.state,"settings":settings,"programs":programs,"signed":owned.signed,"classic_menu":classic,"modern_menu_supported":modern_supported,"modern_menu":package,"package_name":crate::PACKAGE_NAME,"package_publisher":owned.publisher,"path_present":path_present(&installation.root)?,"path_owned":owned.path_owned.is_some(),"pending_cleanup":owned.pending,"transaction_pending":installation.root.join("state/transaction.json").exists()}),
+        serde_json::json!({"installed":true,"root_display":installation.root.to_string_lossy(),"root_utf16":installation.root.as_os_str().encode_wide().collect::<Vec<_>>(),"active_version":installation.active_version,"state":installation.state,"settings":settings,"programs":programs,"signed":owned.signed,"classic_menu":classic,"signer_subject":owned.signer_subject,"path_present":path_present(&installation.root)?,"path_owned":owned.path_owned.is_some(),"pending_cleanup":owned.pending,"transaction_pending":installation.root.join("state/transaction.json").exists()}),
     )
 }
 
@@ -218,10 +206,10 @@ fn run_runtime(
 
 fn verify_runtime_signature(executable: &std::path::Path) -> io::Result<()> {
     if crate::SIGNED_BUILD {
-        let publisher = security::signed_publisher(executable)?;
-        if option_env!("UNLINKA_PACKAGE_PUBLISHER") != Some(publisher.as_str()) {
+        let signer_subject = security::signed_subject(executable)?;
+        if option_env!("UNLINKA_SIGNER_SUBJECT") != Some(signer_subject.as_str()) {
             return Err(invalid(
-                "runtime helper signer differs from this build's Publisher",
+                "runtime helper signer differs from this build's signer subject",
             ));
         }
     }
@@ -310,32 +298,6 @@ pub(super) fn installed_helper_hash_owned(
         .files
         .get(helper)
         .is_some_and(|expected| expected == actual))
-}
-
-struct Apartment(bool);
-
-impl Apartment {
-    fn new() -> io::Result<Self> {
-        use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
-        // SAFETY: initializes COM for this thread; a successful initialization is balanced by Drop.
-        let status = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        if status == windows::Win32::Foundation::RPC_E_CHANGED_MODE {
-            return Ok(Self(false));
-        }
-        status.ok().map_err(crate::win_error)?;
-        Ok(Self(true))
-    }
-}
-
-impl Drop for Apartment {
-    fn drop(&mut self) {
-        if self.0 {
-            // SAFETY: this thread owns exactly one successful COM initialization recorded by new.
-            unsafe {
-                windows::Win32::System::Com::CoUninitialize();
-            }
-        }
-    }
 }
 
 // Previous crashed or concurrent runtimes cannot safely be deleted by this process.

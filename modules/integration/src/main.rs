@@ -8,7 +8,6 @@ use unlinka_integration::{
     read_settings,
 };
 use unlinka_ui::{CANCEL, Dialog, Verification, message_box};
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
 #[derive(Parser)]
 #[command(version, about = "Current-user Unlinka installation maintenance")]
@@ -55,11 +54,6 @@ enum Action {
 }
 
 fn main() {
-    // SAFETY: maintenance runs synchronous WinRT deployment in an initialized MTA.
-    let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-    if let Err(error) = com.ok() {
-        std::process::exit(failure(&io::Error::other(error.to_string())));
-    }
     let mut cli = Cli::parse();
     if matches!(cli.command, Action::Uninstall { .. }) {
         let root = match unlinka_integration::install_root() {

@@ -1,7 +1,7 @@
-//! Shared executable manifests for portable and packaged Windows builds.
+//! Shared executable manifests for Windows builds.
 use std::{env, fs, path::PathBuf};
 
-pub fn embed(binary: &str, package_identity: Option<&str>) {
+pub fn embed(binary: &str) {
     println!("cargo:rerun-if-env-changed=UNLINKA_WINDOWS_RESOURCE");
     println!("cargo:rerun-if-env-changed=UNLINKA_PACKAGE_VERSION");
     println!("cargo:rerun-if-changed=../../packaging/windows.rs");
@@ -35,13 +35,10 @@ pub fn embed(binary: &str, package_identity: Option<&str>) {
     let template =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"))
             .join("../../packaging/unlinka.manifest");
-    let mut manifest = fs::read_to_string(template)
+    let manifest = fs::read_to_string(template)
         .expect("read application manifest")
         .replace("@BINARY_NAME@", binary)
         .replace("@PACKAGE_VERSION@", &version);
-    if let Some(identity) = package_identity {
-        manifest = manifest.replace("</assembly>", &format!("{identity}\n</assembly>"));
-    }
     let path = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"))
         .join(format!("{binary}.manifest"));
     fs::write(&path, manifest).expect("write generated application manifest");

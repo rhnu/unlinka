@@ -142,7 +142,7 @@ pub(super) fn payload(source: &Path, incoming: bool) -> io::Result<Payload> {
         validate_build_policy(
             &payload,
             crate::SIGNED_BUILD,
-            option_env!("UNLINKA_PACKAGE_PUBLISHER"),
+            option_env!("UNLINKA_SIGNER_SUBJECT"),
         )?;
     }
     for entry in &payload.files {
@@ -152,14 +152,12 @@ pub(super) fn payload(source: &Path, incoming: bool) -> io::Result<Payload> {
             return Err(invalid(format!("payload hash mismatch: {}", entry.path)));
         }
         if payload.signed
-            && path.extension().is_some_and(|e| {
-                e.eq_ignore_ascii_case("exe")
-                    || e.eq_ignore_ascii_case("dll")
-                    || e.eq_ignore_ascii_case("msix")
-            })
-            && security::signed_publisher(&path)? != payload.publisher
+            && path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("exe") || e.eq_ignore_ascii_case("dll"))
+            && security::signed_subject(&path)? != payload.signer_subject
         {
-            return Err(invalid("payload signer does not match package Publisher"));
+            return Err(invalid("payload signer does not match signer subject"));
         }
     }
     Ok(payload)
@@ -168,16 +166,16 @@ pub(super) fn payload(source: &Path, incoming: bool) -> io::Result<Payload> {
 pub(super) fn validate_build_policy(
     payload: &Payload,
     signed: bool,
-    publisher: Option<&str>,
+    signer_subject: Option<&str>,
 ) -> io::Result<()> {
     if payload.signed != signed {
         return Err(invalid(
             "payload signing policy does not match this maintenance build",
         ));
     }
-    if signed && publisher != Some(payload.publisher.as_str()) {
+    if signed && signer_subject != Some(payload.signer_subject.as_str()) {
         return Err(invalid(
-            "payload Publisher does not match this maintenance build",
+            "payload signer subject does not match this maintenance build",
         ));
     }
     Ok(())
@@ -187,7 +185,7 @@ pub(super) fn validate_payload_metadata(payload: &Payload) -> io::Result<()> {
     if payload.schema_version != 1
         || payload.protocol_version != 1
         || payload.files.len() > 4096
-        || payload.signed == payload.publisher.is_empty()
+        || payload.signed == payload.signer_subject.is_empty()
     {
         return Err(invalid("unsupported or incomplete payload metadata"));
     }
@@ -207,23 +205,6 @@ pub(super) fn validate_payload_metadata(payload: &Payload) -> io::Result<()> {
             return Err(invalid(format!("payload is missing {required}")));
         }
     }
-    let has_msix = names.contains("unlinka.shellintegration.msix");
-    if payload.signed && !has_msix {
-        return Err(invalid(
-            "signed payload is missing Unlinka.ShellIntegration.msix",
-        ));
-    }
-    if !payload.signed
-        && names.iter().any(|name| {
-            Path::new(name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("msix"))
-        })
-    {
-        return Err(invalid(
-            "unsigned payload must not include an identity package",
-        ));
-    }
     Ok(())
 }
 
@@ -239,9 +220,9 @@ pub(super) fn validate_upgrade_policy(
             "changing signing policy requires a newer package version",
         ));
     }
-    if before.signed && payload.signed && before.publisher != payload.publisher {
+    if before.signed && payload.signed && before.signer_subject != payload.signer_subject {
         return Err(invalid(
-            "package Publisher cannot change during signed upgrade",
+            "signer subject cannot change during signed upgrade",
         ));
     }
     Ok(())
@@ -263,7 +244,7 @@ pub(super) fn owned_payload(
     let payload = payload(&directory, false)?;
     if payload.package_version != version
         || payload.signed != ownership.signed
-        || payload.publisher != ownership.publisher
+        || payload.signer_subject != ownership.signer_subject
     {
         return Err(invalid(
             "installed payload policy differs from ownership metadata",
@@ -298,11 +279,8 @@ pub(super) fn validate_ownership(ownership: &Ownership) -> io::Result<()> {
     if ownership.schema_version != 1 {
         return Err(invalid("unknown ownership schema"));
     }
-    if (ownership.signed
-        && ownership.publisher.is_empty()
-        && (!ownership.files.is_empty() || ownership.package_version.is_some()))
-        || (!ownership.signed
-            && (!ownership.publisher.is_empty() || ownership.package_version.is_some()))
+    if (ownership.signed && ownership.signer_subject.is_empty() && !ownership.files.is_empty())
+        || (!ownership.signed && !ownership.signer_subject.is_empty())
     {
         return Err(invalid("invalid ownership signing policy"));
     }
@@ -311,9 +289,6 @@ pub(super) fn validate_ownership(ownership: &Ownership) -> io::Result<()> {
     }
     for owned in &ownership.registry {
         validate_registry_key(&owned.key)?;
-    }
-    if let Some(version) = &ownership.package_version {
-        validate_version(version)?;
     }
     Ok(())
 }

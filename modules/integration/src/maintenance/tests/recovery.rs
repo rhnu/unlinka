@@ -22,7 +22,7 @@ fn transaction() -> Transaction {
         registry: Vec::new(),
         files: Vec::new(),
         path: Vec::new(),
-        package_touched: false,
+        _legacy_package_touched: (),
         artifacts: Vec::new(),
     }
 }
@@ -135,4 +135,33 @@ fn rejected_path_removal_restores_ownership_and_preserves_earlier_intents() {
     assert_eq!(tx.path[0].entry, previous_entry);
     assert!(tx.path[0].added);
     assert!(tx.path[0].original_missing);
+}
+
+#[test]
+fn unsigned_metadata_reads_existing_ownership_and_transaction_records() {
+    let old_ownership = serde_json::json!({
+        "schema_version":1,"publisher":"","signed":false,
+        "files":{"versions/1.0.0.0/unlinka.exe":"0".repeat(64)},
+        "registry":[],"path_owned":null,"package_version":null,"pending":[]
+    });
+    let owned: Ownership = serde_json::from_value(old_ownership.clone()).unwrap();
+    super::super::validate_ownership(&owned).unwrap();
+    assert!(!owned.signed);
+    assert_eq!(owned.signer_subject, "");
+    assert_eq!(owned.files.len(), 1);
+    let mut old_transaction = serde_json::to_value(transaction()).unwrap();
+    old_transaction["before"] = old_ownership.clone();
+    old_transaction["after"] = old_ownership.clone();
+    old_transaction["package_touched"] = false.into();
+    let recovered: Transaction = serde_json::from_value(old_transaction.clone()).unwrap();
+    assert_eq!(recovered.before.files, owned.files);
+    assert_eq!(recovered.after.files, owned.files);
+    let restored: Transaction =
+        serde_json::from_value(serde_json::to_value(&recovered).unwrap()).unwrap();
+    assert_eq!(restored.after.files, owned.files);
+    old_transaction["package_touched"] = true.into();
+    assert!(serde_json::from_value::<Transaction>(old_transaction).is_err());
+    let mut invalid_ownership = old_ownership;
+    invalid_ownership["package_version"] = "1.0.0.0".into();
+    assert!(serde_json::from_value::<Ownership>(invalid_ownership).is_err());
 }

@@ -4,7 +4,6 @@ use std::{
     ffi::c_void,
     io,
     mem::size_of,
-    os::windows::ffi::OsStrExt,
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
     sync::{
@@ -20,10 +19,10 @@ use windows::{
     Win32::{
         Foundation::{
             CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, CloseHandle, E_FAIL, E_INVALIDARG,
-            E_NOTIMPL, E_OUTOFMEMORY, E_POINTER, FreeLibrary, HMODULE, S_FALSE, S_OK,
+            E_POINTER, FreeLibrary, HMODULE, S_FALSE, S_OK,
         },
         System::{
-            Com::{CoTaskMemAlloc, IBindCtx, IClassFactory, IClassFactory_Impl, IDataObject},
+            Com::{IClassFactory, IClassFactory_Impl, IDataObject},
             LibraryLoader::{
                 FreeLibraryAndExitThread, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                 GetModuleHandleExW,
@@ -34,19 +33,14 @@ use windows::{
         UI::{
             Shell::{
                 CMF_DEFAULTONLY, CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, Common::ITEMIDLIST,
-                ECF_DEFAULT, ECS_ENABLED, ECS_HIDDEN, GCS_HELPTEXTA, GCS_HELPTEXTW, GCS_VALIDATEA,
-                GCS_VALIDATEW, GCS_VERBA, GCS_VERBW, IContextMenu, IContextMenu_Impl,
-                IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellExtInit,
-                IShellExtInit_Impl, IShellItemArray, SHCreateShellItemArrayFromDataObject,
-                SHGetInstanceExplorer,
+                GCS_HELPTEXTA, GCS_HELPTEXTW, GCS_VALIDATEA, GCS_VALIDATEW, GCS_VERBA, GCS_VERBW,
+                IContextMenu, IContextMenu_Impl, IShellExtInit, IShellExtInit_Impl,
+                IShellItemArray, SHCreateShellItemArrayFromDataObject, SHGetInstanceExplorer,
             },
             WindowsAndMessaging::{HMENU, InsertMenuW, MF_BYPOSITION, MF_STRING},
         },
     },
-    core::{
-        BOOL, Error, GUID, HRESULT, IUnknown, Interface, PCWSTR, PSTR, PWSTR, Ref, Result,
-        implement,
-    },
+    core::{BOOL, Error, GUID, HRESULT, IUnknown, Interface, PCWSTR, PSTR, Ref, Result, implement},
 };
 
 use crate::selection::copy_selection;
@@ -116,22 +110,6 @@ fn ready_locale() -> Result<Locale> {
 fn title() -> Result<String> { Ok(Translator::new(locale()?).text("menu-delete")) }
 
 fn wide(text: &str) -> Vec<u16> { text.encode_utf16().chain(Some(0)).collect() }
-
-fn allocated_string(text: &str) -> Result<PWSTR> {
-    let text = wide(text);
-    allocated_wide(&text)
-}
-
-fn allocated_wide(text: &[u16]) -> Result<PWSTR> {
-    // SAFETY: COM expects a caller-owned CoTaskMem string; the allocation size includes NUL.
-    let memory = unsafe { CoTaskMemAlloc(std::mem::size_of_val(text)).cast::<u16>() };
-    if memory.is_null() {
-        return Err(Error::from_hresult(E_OUTOFMEMORY));
-    }
-    // SAFETY: allocation and source have the same checked length and do not overlap.
-    unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), memory, text.len()) };
-    Ok(PWSTR(memory))
-}
 
 #[expect(
     clippy::as_pointer_underscore,
@@ -357,79 +335,6 @@ unsafe fn write_command_string(
     Ok(())
 }
 
-#[expect(
-    clippy::as_pointer_underscore,
-    clippy::ref_as_ptr,
-    clippy::inline_always,
-    reason = "windows implement emits these interface conversions; this scope contains only generated COM bindings"
-)]
-mod modern_object {
-    use super::{IExplorerCommand, ObjectLease, implement};
-
-    #[implement(IExplorerCommand)]
-    pub(super) struct ModernCommand {
-        pub(super) _lease: ObjectLease,
-    }
-}
-use modern_object::{ModernCommand, ModernCommand_Impl};
-
-impl IExplorerCommand_Impl for ModernCommand_Impl {
-    fn GetTitle(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
-        boundary(|| allocated_string(&title()?))
-    }
-
-    fn GetIcon(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
-        boundary(|| {
-            let installation = Installation::current()
-                .map_err(io_error)?
-                .ok_or_else(|| Error::from_hresult(E_FAIL))?;
-            let path = installation.active_dir().join("Assets").join("Unlinka.ico");
-            let location: Vec<u16> = std::iter::once(u16::from(b'"'))
-                .chain(path.as_os_str().encode_wide())
-                .chain([u16::from(b'"'), u16::from(b','), u16::from(b'0'), 0])
-                .collect();
-            allocated_wide(&location)
-        })
-    }
-
-    fn GetToolTip(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
-        boundary(|| allocated_string(&title()?))
-    }
-
-    fn GetCanonicalName(&self) -> Result<GUID> {
-        boundary(|| identity_guid(unlinka_integration::ACTION_GUID))
-    }
-
-    fn GetState(&self, items: Ref<IShellItemArray>, _slow: BOOL) -> Result<u32> {
-        boundary(|| {
-            let visible = ready_locale().is_ok()
-                && items
-                    .as_ref()
-                    .is_some_and(|items| copy_selection(items).is_ok());
-            Ok(if visible {
-                ECS_ENABLED.0 as u32
-            } else {
-                ECS_HIDDEN.0 as u32
-            })
-        })
-    }
-
-    fn Invoke(&self, items: Ref<IShellItemArray>, _context: Ref<IBindCtx>) -> Result<()> {
-        boundary(|| {
-            let items = items
-                .as_ref()
-                .ok_or_else(|| Error::from_hresult(E_INVALIDARG))?;
-            dispatch(copy_selection(items)?)
-        })
-    }
-
-    fn GetFlags(&self) -> Result<u32> { boundary(|| Ok(ECF_DEFAULT.0 as u32)) }
-
-    fn EnumSubCommands(&self) -> Result<IEnumExplorerCommand> {
-        boundary(|| Err(Error::from_hresult(E_NOTIMPL)))
-    }
-}
-
 /// Worker data is completely owned; no apartment-bound COM interface crosses threads.
 struct RequestWork {
     module: HMODULE,
@@ -528,12 +433,6 @@ unsafe extern "system" fn request_worker(context: *mut c_void) -> u32 {
     unsafe { FreeLibraryAndExitThread(module, 0) }
 }
 
-#[derive(Clone, Copy)]
-enum CommandClass {
-    Classic,
-    Modern,
-}
-
 #[expect(
     clippy::as_pointer_underscore,
     clippy::ref_as_ptr,
@@ -541,12 +440,11 @@ enum CommandClass {
     reason = "windows implement emits these interface conversions; this scope contains only generated COM bindings"
 )]
 mod factory_object {
-    use super::{CommandClass, IClassFactory, ObjectLease, implement};
+    use super::{IClassFactory, ObjectLease, implement};
 
     #[implement(IClassFactory)]
     pub(super) struct Factory {
         pub(super) _lease: ObjectLease,
-        pub(super) class: CommandClass,
     }
 }
 use factory_object::{Factory, Factory_Impl};
@@ -567,13 +465,7 @@ impl IClassFactory_Impl for Factory_Impl {
             if outer.as_ref().is_some() {
                 return Err(Error::from_hresult(CLASS_E_NOAGGREGATION));
             }
-            let object: IUnknown = match self.class {
-                CommandClass::Classic => ClassicCommand::new().into(),
-                CommandClass::Modern => ModernCommand {
-                    _lease: ObjectLease::new(),
-                }
-                .into(),
-            };
+            let object: IUnknown = ClassicCommand::new().into();
             // SAFETY: pointers are validated; query adds the requested interface reference.
             unsafe { object.query(iid, output).ok() }
         })
@@ -621,16 +513,11 @@ pub unsafe extern "system" fn DllGetClassObject(
         }
         // SAFETY: COM supplies readable GUIDs for the duration of this call.
         let requested = unsafe { *class };
-        let class = if requested == identity_guid(unlinka_integration::CLASSIC_CLSID)? {
-            CommandClass::Classic
-        } else if requested == identity_guid(unlinka_integration::MODERN_CLSID)? {
-            CommandClass::Modern
-        } else {
+        if requested != identity_guid(unlinka_integration::CLASSIC_CLSID)? {
             return Err(Error::from_hresult(CLASS_E_CLASSNOTAVAILABLE));
-        };
+        }
         let factory: IClassFactory = Factory {
             _lease: ObjectLease::new(),
-            class,
         }
         .into();
         // SAFETY: pointers were validated; COM query transfers an interface reference.

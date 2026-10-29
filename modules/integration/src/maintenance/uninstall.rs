@@ -1,15 +1,15 @@
 use super::{
     File, INSTALL_KEY, Installation, InstallationState, Path, SETTINGS_KEY, Transaction,
     UninstallOutcome, Value, begin, check_no_reparse, classic, cleanup_artifacts, copy_file,
-    edit_path, fs, hash, invalid, io, load_ownership, log_diagnostic, notify, package,
-    prepare_root, purge_logs, read_json, recover, registry, remove_internal_file, remove_owned,
-    request, save_json, validate_ownership,
+    edit_path, fs, hash, invalid, io, load_ownership, log_diagnostic, notify, prepare_root,
+    purge_logs, read_json, recover, registry, remove_internal_file, remove_owned, request,
+    save_json, validate_ownership,
 };
 
 /// Leave the Inno uninstaller and ARP registration untouched until this returns Complete.
 /// # Errors
-/// Fails if maintenance is busy, ownership metadata is invalid, or package,
-/// registry or PATH removal fails. Busy owned files return `RemovalPending`.
+/// Fails if maintenance is busy, ownership metadata is invalid, or registry or PATH
+/// removal fails. Busy owned files return `RemovalPending`.
 pub fn uninstall(purge_settings: bool) -> io::Result<UninstallOutcome> {
     let (root, _guard, lease) = prepare_root()?;
     let mut tx = resume_uninstall(&root)?;
@@ -23,14 +23,6 @@ pub fn uninstall(purge_settings: bool) -> io::Result<UninstallOutcome> {
     tx.save(&root)?;
     tx.state(&root, InstallationState::Removing)?;
     tx.write(&root, SETTINGS_KEY, "MenusEnabled", Some(Value::number(0)))?;
-    // Package removal must complete before any external-location payload is deleted.
-    if tx.after.package_version.is_some() {
-        tx.package_touched = true;
-        tx.save(&root)?;
-        package::remove(&tx.after.publisher, &root)?;
-        tx.after.package_version = None;
-        tx.save(&root)?;
-    }
     classic(&root, &mut tx, "", false)?;
     edit_path(&root, &mut tx, false)?;
     notify();

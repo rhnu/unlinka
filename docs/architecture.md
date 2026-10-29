@@ -1,30 +1,30 @@
 # Architecture
 
-Unlinka is a Windows-only Rust workspace with a CLI, an independent deletion engine, native task dialogs, two Explorer COM adapters, and a current-user installer.
+Unlinka is a Windows-only Rust workspace with a CLI, an independent deletion engine, native task dialogs, a classic Explorer COM adapter, and a current-user installer.
 
 [Windows integration and i18n](windows-integration.md) defines the implemented installation layout, registration contracts, lifecycle recovery, and packaging. Release signing and real Windows menu/lifecycle acceptance remain pending.
 
 ## Responsibilities
 
-| Package / module          | Responsibility                                                                                |
-| ------------------------- | --------------------------------------------------------------------------------------------- |
-| `modules/app` / `cli`     | Arguments, thread budget, and exit status                                                     |
-| `modules/app` / `main`    | Preflight → confirmation → execution → summary, plus cancellation                             |
-| `modules/app` / `confirm` | Interactive terminal confirmation                                                             |
-| `modules/app` / `result`  | Concise terminal reports, versioned JSON results, stable diagnostics, and raw UTF-16 paths    |
-| `modules/core` / `paths`  | Path resolution, input protection, target identity, and duplicate / overlap normalization     |
-| `modules/core` / `engine` | Bounded scheduling, scanning, deletion, directory completion, and summaries                   |
-| `modules/core` / `win`    | UTF-16, handles, reparse-point handling, enumeration, and deletion APIs                       |
-| `modules/i18n`            | Embedded Fluent resources, locale negotiation, shared path/error/outcome/count formatting     |
-| `modules/integration`     | Installation leases, requests, registry/PATH/package ownership, transactions, and maintenance |
-| `modules/launcher`        | Stable installed CLI entry, lossless argument forwarding, and child exit/cancellation         |
-| `modules/desktop`         | Task wording, deletion workers, cancellation, results, and staged settings                    |
-| `modules/ui`              | WinSafe task dialogs, modal details viewer, progress events, and basic diagnostics            |
-| `modules/shell`           | Classic `IContextMenu`, modern `IExplorerCommand`, selection adapters, and COM exports        |
-| `modules/validation`      | Disposable fixtures, path containment, cleanup, and child-process utilities                   |
-| `modules/xtask`           | SVG icon generation, versioned packaging, signing pipeline, benchmarks, and JSON reports      |
-| `assets`                  | Editable SVG icon source and generated Windows PNG / multi-resolution ICO resources           |
-| `packaging`               | Fixed product identities, sparse MSIX template, Inno script, and signing helper               |
+| Package / module          | Responsibility                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `modules/app` / `cli`     | Arguments, thread budget, and exit status                                                  |
+| `modules/app` / `main`    | Preflight → confirmation → execution → summary, plus cancellation                          |
+| `modules/app` / `confirm` | Interactive terminal confirmation                                                          |
+| `modules/app` / `result`  | Concise terminal reports, versioned JSON results, stable diagnostics, and raw UTF-16 paths |
+| `modules/core` / `paths`  | Path resolution, input protection, target identity, and duplicate / overlap normalization  |
+| `modules/core` / `engine` | Bounded scheduling, scanning, deletion, directory completion, and summaries                |
+| `modules/core` / `win`    | UTF-16, handles, reparse-point handling, enumeration, and deletion APIs                    |
+| `modules/i18n`            | Embedded Fluent resources, locale negotiation, shared path/error/outcome/count formatting  |
+| `modules/integration`     | Installation leases, requests, registry/PATH/file ownership, transactions, and maintenance |
+| `modules/launcher`        | Stable installed CLI entry, lossless argument forwarding, and child exit/cancellation      |
+| `modules/desktop`         | Task wording, deletion workers, cancellation, results, and staged settings                 |
+| `modules/ui`              | WinSafe task dialogs, modal details viewer, progress events, and basic diagnostics         |
+| `modules/shell`           | Classic `IContextMenu`, selection adapters, and COM exports                                |
+| `modules/validation`      | Disposable fixtures, path containment, cleanup, and child-process utilities                |
+| `modules/xtask`           | SVG icon generation, versioned packaging, signing pipeline, benchmarks, and JSON reports   |
+| `assets`                  | Editable SVG icon source and generated Windows PNG / multi-resolution ICO resources        |
+| `packaging`               | Fixed product identifiers, Inno script, and signing helper                                 |
 
 The core is independent of the CLI and UI. Callers use `prepare`, display its returned targets, then pass `PreparedTargets` to `execute`. Invalid input prevents the entire batch from starting; execution can partially succeed.
 
@@ -52,17 +52,19 @@ CLI deletion confirms in the terminal using interactive stdin and stderr. The pr
 
 `unlinka-ui` owns native controls, strings crossing Windows calls, callback error/panic handling, and the small set of task-dialog messages and DPI operations missing from WinSafe. It has no dependency on the deletion engine, installation state, or localization. Desktop and maintenance supply wording and action IDs. The `dialogs` feature enables task dialogs and the viewer; Shell uses only the basic diagnostic API. The integration library's optional `maintenance-ui` feature is enabled by default for its maintenance executable and disabled by workspace library consumers, so an isolated CLI or Shell build does not acquire maintenance dialogs.
 
-All four executables embed the shared [Windows manifest](../packaging/unlinka.manifest) through [one build helper](../packaging/windows.rs), including Common Controls v6, current-user privileges, long-path support, and DPI awareness. Common Controls v6 must be selected before the loader resolves `TaskDialogIndirect`; initializing controls in `main` cannot repair a missing import. Only signed desktop builds add MSIX identity. Shell dialog failure returns a confirmation error. See Microsoft's [task dialog documentation](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-taskdialogindirect).
+All four executables embed the shared [Windows manifest](../packaging/unlinka.manifest) through [one build helper](../packaging/windows.rs), including Common Controls v6, current-user privileges, long-path support, and DPI awareness. Common Controls v6 must be selected before the loader resolves `TaskDialogIndirect`; initializing controls in `main` cannot repair a missing import. Shell dialog failure returns a confirmation error. See Microsoft's [task dialog documentation](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-taskdialogindirect).
 
 The desktop process uses separate confirmation, execution, and result TaskDialogs. Its task controller starts the deletion worker only after the progress dialog reports successful creation, observes progress, and owns cancellation and joining. Dialog creation failure cannot start deletion; callback errors or panics cancel and join an existing worker before returning. Execution displays activity and counts without an exact percentage; Cancel, Escape, and window close request cancellation and wait for active operations. Cancellation changes the heading while preserving counts. Results distinguish complete, incomplete, and cancelled execution; failures keep their total and first path/reason visible, with up to 100 retained details in the same scrollable viewer. CLI reports show up to 5 failures by default; `-v` exposes all retained details, operations, and codes. Common Windows permission, sharing, missing-item, write-protection, and nonempty-directory errors are localized without hiding unknown system descriptions. JSON and engine failure retention remain unchanged.
 
-Settings stage language/menu/PATH choices before calling maintenance. All packaging builds embed four-part versions and icon resources. Certificate-backed builds also embed matching sparse-package name, Publisher, and application ID; unsigned builds omit the desktop package identity and MSIX.
+Settings stage language/menu/PATH choices before calling maintenance. All packaging builds embed four-part versions and icon resources. Optional Authenticode signing covers the EXE/DLL payload, Setup, and its uninstaller.
 
-`cargo xtask pack` defaults to an installable unsigned package with classic menus on Windows 10 and Windows 11's Show more options. Supplying Publisher, certificate thumbprint, and timestamp URL together enables EXE/DLL, MSIX, and Setup signing and the Windows 11 modern menu. Both modes share fixed product identities, installation paths, and output names. Payload schema 1 records a `signed` boolean: signature checks apply to signed payloads, while file hashes, ACLs, installation leases, ownership checks, and transaction protection apply to both modes.
+`cargo xtask pack` defaults to an installable unsigned package with classic menus on Windows 10 and Windows 11's Show more options. Supplying certificate Subject through `--publisher`, certificate thumbprint, and timestamp URL together enables EXE/DLL and Setup signing. Signing does not change the menu registration. Both modes share fixed product identities, installation paths, and output names. Payload schema 1 records a `signed` boolean and `signer_subject`: signature checks apply to signed payloads, while file hashes, ACLs, installation leases, ownership checks, and transaction protection apply to both modes.
 
 ## Dependencies
 
-Runtime dependencies provide native UI ([WinSafe](https://github.com/rodrigocfd/winsafe) 0.0.29), Win32 bindings (`windows-sys` for existing engine code and private UI message/DPI helpers; typed `windows`/matching `windows-core` 0.62.2 for COM and deployment), argument parsing (`clap`), bounded channels (`crossbeam-channel`), cancellation (`ctrlc`), grapheme segmentation (`unicode-segmentation`), localization (`fluent-bundle` 0.16.0 / `unic-langid` 0.9.6), and versioned protocols/manifests (`serde`, `serde_json`, `sha2`). Versions and features are declared in [Cargo.toml](../Cargo.toml) and resolved in [Cargo.lock](../Cargo.lock).
+Runtime dependencies provide native UI ([WinSafe](https://github.com/rodrigocfd/winsafe) 0.0.29), Win32 bindings (`windows-sys` for existing engine code and private UI message/DPI helpers; typed `windows`/matching `windows-core` 0.62.2 for COM and Windows integration), argument parsing (`clap`), bounded channels (`crossbeam-channel`), cancellation (`ctrlc`), grapheme segmentation (`unicode-segmentation`), localization (`fluent-bundle` 0.16.0 / `unic-langid` 0.9.6), and versioned protocols/manifests (`serde`, `serde_json`, `sha2`). Versions and features are declared in [Cargo.toml](../Cargo.toml) and resolved in [Cargo.lock](../Cargo.lock).
+
+The development-only compiler acquisition uses `ureq` for HTTPS and `zip` for archive extraction. An explicit `flate2` Rust backend keeps extraction from changing the renderer's PNG compression through Cargo feature unification. It uses a fixed compiler archive SHA-256 and checks cached files against that verified archive before invoking the compiler. The archive source, version, and cache behavior are described in [Windows integration](windows-integration.md#61-构建统一安装包).
 
 The development-only icon generator uses [resvg](https://github.com/linebender/resvg) 0.48.1 with font and raster-image features disabled to render vector geometry, and [ico](https://github.com/mdsteele/rust-ico) 0.6.0 to encode Windows icons. Neither dependency is linked into the application binaries.
 
@@ -75,9 +77,9 @@ cargo xtask assets
 cargo xtask assets --check
 ```
 
-The first command writes the committed resources in `assets/windows`; the second compares them with the SVG without changing files and fails on missing or outdated resources. The ICO contains native 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 px frames. Small frames use BMP encoding; the 256 px frame uses PNG. PNG resources include the base manifest logos, 100–400% scale variants, 14 app-list target sizes with default / light / dark filename qualifiers, and a 256 px preview. All sizes are rendered directly from SVG, and the same black-and-white design is used for both themes. Asset names and sizes follow [Microsoft's icon construction guidance](https://learn.microsoft.com/en-us/windows/apps/design/iconography/app-icon-construction).
+The first command writes the committed resources in `assets/windows`; the second compares them with the SVG without changing files and fails on missing or outdated resources. The ICO contains native 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 px frames. Small frames use BMP encoding; the 256 px frame uses PNG. A 256 px PNG provides the preview. All sizes are rendered directly from SVG, and the same black-and-white design is used for both themes.
 
-`cargo xtask pack` renders its own fresh resources from the SVG into the package output before compiling EXE / DLL icons and the installer. Resource scripts use UTF-8 explicitly so non-ASCII checkout paths remain valid. Packaging enables the static MSVC C runtime for all distributed EXE/DLL files, including when inherited compiler flags request dynamic CRT, so the installer does not require a separate VC++ Redistributable. It copies only the generated Windows resources into the installed `Assets` directory, retaining the manifest and Explorer path contracts.
+`cargo xtask pack` renders its own fresh resources from the SVG into the package output before compiling EXE / DLL icons and the installer. Resource scripts use UTF-8 explicitly so non-ASCII checkout paths remain valid. Packaging enables the static MSVC C runtime for all distributed EXE/DLL files, including when inherited compiler flags request dynamic CRT, so the installer does not require a separate VC++ Redistributable. The generated images are build resources; installed applications use their embedded icons.
 
 ## Development and validation
 
@@ -95,7 +97,7 @@ cargo build --release --locked
 
 ### Continuous integration
 
-[CI](../.github/workflows/ci.yml) runs on pushes, pull requests, and manual dispatch. The Windows job uses Rust 1.99 MSVC, rustfmt, Clippy, and Rusteward for compilation, formatting, lint, and unit tests, checks generated icons against the SVG, then runs sequential release-mode acceptance and cancellation tests. Acceptance uses one test thread and reports symbolic-link privilege skips; cancellation checks 1 / 8 deletion threads. Cargo commands use `--locked`. Installer packaging and benchmarks run manually. CI does not install the product, register packages/menus, or change certificate trust.
+[CI](../.github/workflows/ci.yml) runs on pushes, pull requests, and manual dispatch. The Windows job uses Rust 1.99 MSVC, rustfmt, Clippy, and Rusteward for compilation, formatting, lint, and unit tests, checks generated icons against the SVG, then runs sequential release-mode acceptance and cancellation tests. Acceptance uses one test thread and reports symbolic-link privilege skips; cancellation checks 1 / 8 deletion threads. Cargo commands use `--locked`. Installer packaging and benchmarks run manually. CI does not install the product, register menus, or change certificate trust.
 
 ### Markdown maintenance
 

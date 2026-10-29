@@ -44,18 +44,9 @@ pub(super) fn configure(
         .env("UNLINKA_WINDOWS_RESOURCE", application_resource)
         .env("UNLINKA_DLL_RESOURCE", dll_resource);
     if context.options.signed() {
-        build
-            .env("UNLINKA_PACKAGE_NAME", &context.identity.package_name)
-            .env("UNLINKA_PACKAGE_PUBLISHER", context.options.publisher())
-            .env("UNLINKA_PACKAGE_APP_ID", &context.identity.application_id);
+        build.env("UNLINKA_SIGNER_SUBJECT", context.options.publisher());
     } else {
-        for name in [
-            "UNLINKA_PACKAGE_NAME",
-            "UNLINKA_PACKAGE_PUBLISHER",
-            "UNLINKA_PACKAGE_APP_ID",
-        ] {
-            build.env_remove(name);
-        }
+        build.env_remove("UNLINKA_SIGNER_SUBJECT");
     }
     Ok(())
 }

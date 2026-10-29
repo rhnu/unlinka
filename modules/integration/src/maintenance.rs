@@ -39,8 +39,7 @@ use user_path::{compensation, edit_path, path_present, rollback_path};
 
 use crate::{
     CLASSIC_CLSID, INSTALL_KEY, Installation, InstallationState, SETTINGS_KEY, Settings,
-    check_file, check_no_reparse, guid, install_root, invalid, lock, notify, package, pcw,
-    read_settings,
+    check_file, check_no_reparse, guid, install_root, invalid, lock, notify, pcw, read_settings,
     registry::{self, Value},
     request, security, validate_language, wide,
 };
@@ -50,7 +49,8 @@ use crate::{
 pub struct Payload {
     pub schema_version: u32,
     pub package_version: String,
-    pub publisher: String,
+    #[serde(alias = "publisher")]
+    pub signer_subject: String,
     #[serde(default = "legacy_signed")]
     pub signed: bool,
     pub protocol_version: u32,
@@ -68,13 +68,16 @@ pub struct PayloadFile {
 #[serde(deny_unknown_fields)]
 struct Ownership {
     schema_version: u32,
-    publisher: String,
+    #[serde(alias = "publisher")]
+    signer_subject: String,
     #[serde(default = "legacy_signed")]
     signed: bool,
     files: BTreeMap<String, String>,
     registry: Vec<OwnedValue>,
     path_owned: Option<Vec<u16>>,
-    package_version: Option<String>,
+    // Existing unsigned ownership records contain this null field.
+    #[serde(default, rename = "package_version", skip_serializing)]
+    _legacy_package_version: (),
     pending: Vec<String>,
 }
 
@@ -154,9 +157,28 @@ struct Transaction {
     registry: Vec<RegistryChange>,
     files: Vec<FileChange>,
     path: Vec<PathChange>,
-    package_touched: bool,
+    // Existing unsigned transactions contain this false field.
+    #[serde(
+        default,
+        rename = "package_touched",
+        skip_serializing,
+        deserialize_with = "unsigned_package_untouched"
+    )]
+    _legacy_package_touched: (),
     #[serde(default)]
     artifacts: Vec<Artifact>,
+}
+
+/// Accept only the inert field written by existing unsigned installations.
+fn unsigned_package_untouched<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
+    if bool::deserialize(deserializer)? {
+        return Err(serde::de::Error::custom(
+            "unsupported package deployment transaction",
+        ));
+    }
+    Ok(())
 }
 
 fn classic(root: &Path, tx: &mut Transaction, version: &str, enabled: bool) -> io::Result<()> {
@@ -249,28 +271,10 @@ fn apply_integrations(
     version: &str,
     options: &Settings,
 ) -> io::Result<()> {
-    let modern = tx.after.signed && package::modern_supported()?;
     if !options.menus_enabled {
         tx.write(root, SETTINGS_KEY, "MenusEnabled", Some(Value::number(0)))?;
     }
     classic(root, tx, version, options.menus_enabled)?;
-    if modern && (options.menus_enabled || tx.after.package_version.is_some()) {
-        if options.menus_enabled {
-            let directory = root.join("versions").join(version);
-            if !package::verify(&tx.after.publisher, version, &directory)? {
-                tx.package_touched = true;
-                tx.save(root)?;
-                package::add(&tx.after.publisher, version, &directory, root)?;
-            }
-            tx.after.package_version = Some(version.into());
-        } else {
-            tx.package_touched = true;
-            tx.save(root)?;
-            package::remove(&tx.after.publisher, root)?;
-            tx.after.package_version = None;
-        }
-        tx.save(root)?;
-    }
     edit_path(root, tx, options.path_enabled)
 }
 
@@ -309,13 +313,15 @@ pub fn install(
         ));
     }
     if payload.signed
-        && (security::signed_publisher(launcher)? != payload.publisher
-            || security::signed_publisher(maintenance_binary)? != payload.publisher)
+        && (security::signed_subject(launcher)? != payload.signer_subject
+            || security::signed_subject(maintenance_binary)? != payload.signer_subject)
     {
-        return Err(invalid("stable binary signer does not match Publisher"));
+        return Err(invalid(
+            "stable binary signer does not match signer subject",
+        ));
     }
     validate_language(&initial.language)?;
-    package::modern_supported()?;
+    security::validate_platform()?;
     check_disk_space(&source, &payload, launcher, maintenance_binary)?;
     let (root, _guard, _lease) = prepare_root()?;
     restore_pending_uninstall_helper(&root, maintenance_binary, &payload)?;
@@ -345,21 +351,12 @@ pub fn install(
         validate_upgrade_policy(&before, &payload, &current.active_version)?;
     }
     let options = initial;
-    verify_existing_package(&root, &before, &payload)?;
 
     let previous_version = installation.as_ref().map(|i| i.active_version.clone());
     let mut tx = begin(&root, installation, before, false)?;
     let result = (|| {
-        // Remove the old signed identity before adopting an unsigned policy. Recovery
-        // retains the prior Publisher until this deployment intent is completed.
-        if !payload.signed && tx.after.package_version.is_some() {
-            tx.package_touched = true;
-            tx.save(&root)?;
-            package::remove(&tx.before.publisher, &root)?;
-            tx.after.package_version = None;
-        }
         tx.after.signed = payload.signed;
-        tx.after.publisher.clone_from(&payload.publisher);
+        tx.after.signer_subject.clone_from(&payload.signer_subject);
         tx.save(&root)?;
         tx.write(
             &root,
@@ -397,34 +394,6 @@ pub fn install(
     Ok(())
 }
 
-/// Check package ownership before either mode updates or removes its registration.
-fn verify_existing_package(root: &Path, before: &Ownership, payload: &Payload) -> io::Result<()> {
-    if !package::modern_supported()? || !(before.signed || payload.signed) {
-        return Ok(());
-    }
-    let publisher = if before.signed {
-        &before.publisher
-    } else {
-        &payload.publisher
-    };
-    if !package::find(publisher)?.is_empty() {
-        let previous = before
-            .package_version
-            .as_deref()
-            .ok_or_else(|| invalid("existing identity package has no ownership record"))?;
-        if !package::verify(
-            &before.publisher,
-            previous,
-            &root.join("versions").join(previous),
-        )? {
-            return Err(invalid(
-                "existing identity package external location or version was changed externally",
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn restore_pending_uninstall_helper(
     root: &Path,
     source: &Path,
@@ -440,7 +409,7 @@ fn restore_pending_uninstall_helper(
     }
     if tx.schema_version != 1
         || !request::valid_id(&tx.id)
-        || tx.after.publisher != payload.publisher
+        || tx.after.signer_subject != payload.signer_subject
         || tx.after.signed != payload.signed
     {
         return Err(invalid(
@@ -472,40 +441,6 @@ fn restore_pending_uninstall_helper(
     Err(io::Error::other(
         "A previous uninstall is pending. Its maintenance entry is available again; run Unlinka uninstall to finish cleanup before installing.",
     ))
-}
-
-pub(crate) fn owns_package_location(root: &Path, location: &Path) -> io::Result<bool> {
-    check_no_reparse(location)?;
-    let versions = root.join("versions");
-    if location.parent() != Some(versions.as_path()) {
-        return Ok(false);
-    }
-    let version = location
-        .file_name()
-        .and_then(|v| v.to_str())
-        .ok_or_else(|| invalid("package location has no valid version"))?;
-    validate_version(version)?;
-    let prefix = format!("versions/{version}/");
-    let ownership = load_ownership(root)?;
-    if ownership.files.keys().any(|path| path.starts_with(&prefix)) {
-        return Ok(true);
-    }
-    let tx: Transaction = match read_json(&root.join("state/transaction.json")) {
-        Ok(value) => value,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    if tx.schema_version != 1 || !request::valid_id(&tx.id) {
-        return Err(invalid("invalid package ownership transaction"));
-    }
-    validate_ownership(&tx.before)?;
-    validate_ownership(&tx.after)?;
-    Ok(tx
-        .before
-        .files
-        .keys()
-        .chain(tx.after.files.keys())
-        .any(|path| path.starts_with(&prefix)))
 }
 
 fn check_disk_space(
@@ -573,7 +508,7 @@ pub fn configure(options: &Settings) -> io::Result<()> {
 
 /// # Errors
 /// Fails if maintenance is busy, trusted repair files are unavailable, or file,
-/// registry or package restoration cannot complete.
+/// registry restoration cannot complete.
 pub fn repair(source: Option<&Path>) -> io::Result<()> {
     if let Some(source) = source {
         let root = install_root()?;

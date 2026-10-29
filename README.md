@@ -8,14 +8,14 @@ Deletion bypasses the Recycle Bin. Cancellation stops work that has not started;
 
 ## Installation
 
-The x64 current-user installer targets Windows 10/11 without administrator privileges. The default unsigned build installs the classic Explorer menu: directly on Windows 10 and under **Show more options** on Windows 11. Menus and user PATH are enabled by default. A build signed with a trusted certificate also enables the Windows 11 modern menu. The fixed installation root is `%LocalAppData%\Programs\Unlinka`; the Start menu shortcut opens language, menu, and PATH settings. Menu actions always open a confirmation dialog, then show progress, cancellation, and results.
+The x64 current-user installer targets Windows 10/11 without administrator privileges. The default unsigned build installs the classic Explorer menu: directly on Windows 10 and under **Show more options** on Windows 11. Menus and user PATH are enabled by default. Signing is optional and does not change menu behavior. The fixed installation root is `%LocalAppData%\Programs\Unlinka`; the Start menu shortcut opens language, menu, and PATH settings. Menu actions always open a confirmation dialog, then show progress, cancellation, and results.
 
-Installer, repair, upgrade, and uninstall code is implemented. Unsigned builds are installable and contain no MSIX or desktop package identity. Signed and unsigned builds share the same product identity and installation. Certificate-backed signing and real Windows lifecycle/menu acceptance remain pending. See [integration and packaging](docs/windows-integration.md) for signing options and remaining validation.
+Installer, repair, upgrade, and uninstall code is implemented. Unsigned builds are installable; signed builds additionally validate Authenticode signatures. Signed and unsigned builds share the same product identity and installation. Certificate-backed signing and real Windows lifecycle/menu acceptance remain pending. See [integration and packaging](docs/windows-integration.md) for signing options and remaining validation.
 
-Build the default installer with Rust 1.99 MSVC, Windows SDK x64 build tools, and Inno Setup 7.1:
+Build the default installer with Rust 1.99 MSVC and Windows SDK x64 build tools. The first build downloads and verifies the Inno compiler; later builds verify and reuse its local cache. No separate Inno installation or compiler path is needed:
 
 ```powershell
-cargo xtask pack --build-number 1 --iscc "C:\Tools\Inno\ISCC.exe"
+cargo xtask pack --build-number 2
 ```
 
 Outputs are immutable under `target/packages/<four-part-version>`; use a new build number for each package. Setup is named `Unlinka-Setup-<four-part-version>-x64.exe` for both signing modes. To enable signing, supply `--publisher`, `--certificate-thumbprint`, and `--timestamp-url` together; Publisher must exactly match the certificate Subject. The payload's `unlinka.exe` also runs as a portable CLI. Installed upgrades preserve settings and retain the preceding payload for rollback. Uninstall preserves preferences and logs unless selected otherwise; occupied DLLs leave a reported pending state and a usable uninstall entry for retry.
@@ -80,4 +80,4 @@ Unlinka does not include Recycle Bin deletion, exact percentage progress, automa
 
 - [Architecture and development](docs/architecture.md): module responsibilities, deletion constraints, native confirmation, dependencies, and source checks.
 - [Acceptance status](docs/acceptance.md): current results, verification gaps, benchmarks, and validation commands.
-- [Windows integration and i18n](docs/windows-integration.md) (Chinese): implemented installation layout, modern and classic registration, lifecycle recovery, packaging, and remaining acceptance.
+- [Windows integration and i18n](docs/windows-integration.md) (Chinese): installation layout, classic menu registration, lifecycle recovery, packaging, and remaining acceptance.

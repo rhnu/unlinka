@@ -8,12 +8,12 @@ use windows::{
 use super::{CMIC_MASK_UNICODE, VERB, validate_invocation, wide, write_command_string};
 
 #[test]
-fn com_factories_preserve_identity_and_unload_lifetimes() {
+fn classic_factory_preserves_identity_and_unload_lifetimes() {
     use windows::{
         Win32::{
             Foundation::{CLASS_E_CLASSNOTAVAILABLE, S_FALSE, S_OK},
             System::Com::IClassFactory,
-            UI::Shell::{IContextMenu, IExplorerCommand, IShellExtInit},
+            UI::Shell::{IContextMenu, IShellExtInit},
         },
         core::{GUID, IUnknown, Interface},
     };
@@ -55,26 +55,6 @@ fn com_factories_preserve_identity_and_unload_lifetimes() {
     // SAFETY: an unbalanced unlock must fail without changing server state.
     assert!(unsafe { factory.LockServer(false) }.is_err());
     drop(factory);
-    assert_eq!(DllCanUnloadNow(), S_OK);
-
-    let modern = identity_guid(unlinka_integration::MODERN_CLSID).unwrap();
-    // SAFETY: live GUIDs and writable output storage receive the modern factory reference.
-    let status =
-        unsafe { DllGetClassObject(&raw const modern, &raw const factory_iid, &raw mut output) };
-    assert_eq!(status, S_OK);
-    // SAFETY: the successful call transferred exactly one owned factory reference.
-    let factory = unsafe { IClassFactory::from_raw(output) };
-    // SAFETY: the authored factory implements this interface and supports no aggregation.
-    let command: IExplorerCommand = unsafe { factory.CreateInstance(None) }.unwrap();
-    // SAFETY: this live authored command returns its canonical action GUID without pointer input.
-    let canonical = unsafe { command.GetCanonicalName() }.unwrap();
-    assert_eq!(
-        canonical,
-        identity_guid(unlinka_integration::ACTION_GUID).unwrap()
-    );
-    drop(factory);
-    assert_eq!(DllCanUnloadNow(), S_FALSE);
-    drop(command);
     assert_eq!(DllCanUnloadNow(), S_OK);
 }
 

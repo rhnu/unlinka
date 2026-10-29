@@ -8,14 +8,14 @@ Windows 快速删除工具，提供双语 CLI、Windows 原生任务窗口和 Ex
 
 ## 安装
 
-x64 当前用户安装器面向 Windows 10/11，无需管理员权限。默认未签名构建注册经典菜单：Windows 10 直接显示，Windows 11 位于“显示更多选项”。使用受信任证书签名后，Windows 11 还可使用新菜单。菜单和用户 PATH 默认启用。安装位置固定为 `%LocalAppData%\Programs\Unlinka`，开始菜单快捷方式打开语言、菜单和 PATH 设置。右键操作始终先确认，再显示执行进度、取消和结果。
+x64 当前用户安装器面向 Windows 10/11，无需管理员权限。默认未签名构建注册经典菜单：Windows 10 直接显示，Windows 11 位于“显示更多选项”。签名为可选功能，不改变菜单行为。菜单和用户 PATH 默认启用。安装位置固定为 `%LocalAppData%\Programs\Unlinka`，开始菜单快捷方式打开语言、菜单和 PATH 设置。右键操作始终先确认，再显示执行进度、取消和结果。
 
-安装、升级、修复与卸载代码已实现。未签名构建可以安装，不包含 MSIX 或桌面包身份；签名与未签名构建使用同一产品标识和安装位置。证书签名构建及真实 Windows 生命周期/菜单验收仍待完成，签名选项与待验收范围见 [Windows 集成说明](docs/windows-integration.md)。
+安装、升级、修复与卸载代码已实现。未签名构建可以安装，签名构建额外校验 Authenticode 签名；签名与未签名构建使用同一产品标识和安装位置。证书签名构建及真实 Windows 生命周期/菜单验收仍待完成，签名选项与待验收范围见 [Windows 集成说明](docs/windows-integration.md)。
 
-准备 Rust 1.99 MSVC、Windows SDK x64 构建工具和 Inno Setup 7.1，构建默认安装包：
+准备 Rust 1.99 MSVC 和 Windows SDK x64 构建工具。首次打包自动下载并校验 Inno 编译器，之后校验并复用本地缓存，无需单独安装 Inno 或指定编译器路径：
 
 ```powershell
-cargo xtask pack --build-number 1 --iscc "C:\Tools\Inno\ISCC.exe"
+cargo xtask pack --build-number 2
 ```
 
 产物位于 `target/packages/<四段版本>`，已有版本不可覆盖，每次打包使用新的构建号。两种签名状态均使用 `Unlinka-Setup-<四段版本>-x64.exe`。需要签名时，同时提供 `--publisher`、`--certificate-thumbprint` 和 `--timestamp-url`；Publisher 必须与证书 Subject 完全一致。payload 中的 `unlinka.exe` 也可作为便携 CLI 使用。升级保留设置及上一完整版本用于回退。卸载默认保留偏好和日志；DLL 被占用时报告待清理状态并保留卸载入口，释放后重试。
@@ -80,4 +80,4 @@ Unlinka 不修改只读属性、不提权，也不结束占用文件的进程。
 
 - [架构与开发](docs/architecture.md)：模块职责、删除约束、原生确认、依赖和源码检查。
 - [验收现状](docs/acceptance.md)：当前结果、验证缺口、性能结论和验证命令。
-- [Windows 集成与 i18n](docs/windows-integration.md)：已实现的安装布局、两种菜单注册、升级与卸载恢复、打包及待完成验收。
+- [Windows 集成与 i18n](docs/windows-integration.md)：已实现的安装布局、经典菜单注册、升级与卸载恢复、打包及待完成验收。

@@ -4,8 +4,8 @@ use std::{env, fmt::Write, fs, path::PathBuf};
 mod windows;
 
 fn main() {
-    windows::embed("unlinka-maintenance", None);
-    println!("cargo:rerun-if-env-changed=UNLINKA_PACKAGE_PUBLISHER");
+    windows::embed("unlinka-maintenance");
+    println!("cargo:rerun-if-env-changed=UNLINKA_SIGNER_SUBJECT");
     println!("cargo:rerun-if-env-changed=UNLINKA_SIGNED_BUILD");
     let signed = match env::var("UNLINKA_SIGNED_BUILD") {
         Ok(value) if value == "1" => true,
@@ -14,13 +14,13 @@ fn main() {
         _ => panic!("UNLINKA_SIGNED_BUILD must be 0 or 1"),
     };
     if signed {
-        let publisher = env::var("UNLINKA_PACKAGE_PUBLISHER")
-            .expect("signed builds require UNLINKA_PACKAGE_PUBLISHER");
+        let signer_subject = env::var("UNLINKA_SIGNER_SUBJECT")
+            .expect("signed builds require UNLINKA_SIGNER_SUBJECT");
         assert!(
-            !publisher.trim().is_empty(),
-            "signed builds require a nonempty UNLINKA_PACKAGE_PUBLISHER"
+            !signer_subject.trim().is_empty(),
+            "signed builds require a nonempty UNLINKA_SIGNER_SUBJECT"
         );
-        println!("cargo:rustc-env=UNLINKA_PACKAGE_PUBLISHER={publisher}");
+        println!("cargo:rustc-env=UNLINKA_SIGNER_SUBJECT={signer_subject}");
     }
     println!("cargo:rerun-if-changed=../../packaging/identity.json");
     let identity: serde_json::Value = serde_json::from_slice(
@@ -31,9 +31,6 @@ fn main() {
     writeln!(constants, "pub const SIGNED_BUILD: bool = {signed};").expect("write build mode");
     for (name, key, braces) in [
         ("CLASSIC_CLSID", "classic_clsid", true),
-        ("MODERN_CLSID", "modern_clsid", true),
-        ("ACTION_GUID", "action_guid", true),
-        ("PACKAGE_NAME", "package_name", false),
         ("INSTALL_NAME", "install_name", false),
     ] {
         let value = identity[key].as_str().expect("identity field");

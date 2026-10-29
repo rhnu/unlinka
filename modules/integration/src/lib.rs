@@ -25,7 +25,6 @@ use windows::{
 };
 
 pub mod maintenance;
-mod package;
 mod registry;
 pub mod request;
 mod security;

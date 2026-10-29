@@ -7,13 +7,6 @@ use std::{
 use resvg::{tiny_skia, usvg};
 
 const ICON_SIZES: &[u32] = &[16, 20, 24, 32, 40, 48, 64, 96, 128, 256];
-const TARGET_SIZES: &[u32] = &[16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256];
-const SCALES: &[u32] = &[100, 125, 150, 200, 250, 300, 400];
-const LOGOS: &[(&str, u32)] = &[
-    ("StoreLogo", 50),
-    ("Square44x44Logo", 44),
-    ("Square150x150Logo", 150),
-];
 
 struct Asset {
     name: String,
@@ -89,33 +82,13 @@ fn render_assets(svg: &[u8]) -> io::Result<Vec<Asset>> {
             "the icon SVG must have a square canvas",
         ));
     }
-    let mut assets = Vec::new();
-    for &(name, base_size) in LOGOS {
-        assets.push(png(&tree, format!("{name}.png"), base_size)?);
-        for &scale in SCALES {
-            // Windows rounds fractional scale dimensions to the nearest pixel.
-            let size = (base_size * scale + 50) / 100;
-            assets.push(png(&tree, format!("{name}.scale-{scale}.png"), size)?);
-        }
-    }
-    for &size in TARGET_SIZES {
-        let bytes = render(&tree, size)?
-            .encode_png()
-            .map_err(io::Error::other)?;
-        // The high-contrast black plate and white mark work in both themes.
-        for suffix in ["", "_altform-unplated", "_altform-lightunplated"] {
-            assets.push(Asset {
-                name: format!("Square44x44Logo.targetsize-{size}{suffix}.png"),
-                bytes: bytes.clone(),
-            });
-        }
-    }
-    assets.push(png(&tree, "Unlinka.png".into(), 256)?);
-    assets.push(Asset {
-        name: "Unlinka.ico".into(),
-        bytes: icon(&tree)?,
-    });
-    Ok(assets)
+    Ok(vec![
+        png(&tree, "Unlinka.png".into(), 256)?,
+        Asset {
+            name: "Unlinka.ico".into(),
+            bytes: icon(&tree)?,
+        },
+    ])
 }
 
 fn png(tree: &usvg::Tree, name: String, size: u32) -> io::Result<Asset> {

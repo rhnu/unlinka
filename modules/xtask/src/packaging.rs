@@ -1,4 +1,4 @@
-//! Immutable Windows installers with optional signing and modern Shell identity.
+//! Immutable Windows installers with optional Authenticode signing.
 use std::{
     env,
     fmt::Write as _,
@@ -10,6 +10,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod compiler;
 mod flags;
 
 pub(crate) struct Options {
@@ -17,7 +18,6 @@ pub(crate) struct Options {
     pub certificate_thumbprint: Option<String>,
     pub timestamp_url: Option<String>,
     pub build_number: u16,
-    pub iscc: Option<PathBuf>,
     pub sdk_bin: Option<PathBuf>,
 }
 
@@ -32,11 +32,6 @@ struct Identity {
     app_id: String,
     #[serde(rename = "classic_clsid")]
     _classic_clsid: String,
-    modern_clsid: String,
-    #[serde(rename = "action_guid")]
-    _action_guid: String,
-    package_name: String,
-    application_id: String,
     install_name: String,
 }
 
@@ -45,7 +40,7 @@ struct Payload {
     schema_version: u32,
     signed: bool,
     package_version: String,
-    publisher: String,
+    signer_subject: String,
     protocol_version: u32,
     files: Vec<PayloadFile>,
 }
@@ -77,14 +72,10 @@ pub(crate) fn run(options: &Options) -> io::Result<()> {
         ));
     }
     let sdk = sdk_bin(options.sdk_bin.as_deref(), options.signed())?;
-    let iscc = options
-        .iscc
-        .clone()
-        .or_else(|| env::var_os("UNLINKA_ISCC").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("ISCC.exe"));
     if options.signed() {
         verify_certificate(options)?;
     }
+    let iscc = compiler::acquire(&root)?;
     fs::create_dir_all(&output)?;
     let assets = output.join("assets");
     crate::assets::generate(&root.join("assets/Unlinka.svg"), &assets)?;
@@ -104,9 +95,9 @@ pub(crate) fn run(options: &Options) -> io::Result<()> {
     eprintln!(
         "{}",
         if options.signed() {
-            "Signed installer: classic menus and Windows 11 modern menu are available."
+            "Signed installer with classic Explorer menus built."
         } else {
-            "Unsigned installer: classic menus are available; no certificate or MSIX registration is required."
+            "Unsigned installer with classic Explorer menus built."
         }
     );
     Ok(())
@@ -149,11 +140,9 @@ fn build_binaries(context: &PackageBuild<'_>) -> io::Result<PathBuf> {
 
 fn build_payload(context: &PackageBuild<'_>, binaries: &Path) -> io::Result<PathBuf> {
     let PackageBuild {
-        root,
         output,
         sdk,
         options,
-        identity,
         version,
         ..
     } = context;
@@ -170,7 +159,6 @@ fn build_payload(context: &PackageBuild<'_>, binaries: &Path) -> io::Result<Path
     for name in ["unlinka-launcher.exe", "unlinka-maintenance.exe"] {
         fs::copy(binaries.join(name), output.join(name))?;
     }
-    copy_assets(context.assets, &payload.join("Assets"))?;
     let signed_files = [
         payload.join("unlinka.exe"),
         payload.join("unlinka-desktop.exe"),
@@ -181,22 +169,6 @@ fn build_payload(context: &PackageBuild<'_>, binaries: &Path) -> io::Result<Path
     for path in &signed_files {
         sign(&signtool, options, path)?;
     }
-    if options.signed() {
-        let sparse = output.join("sparse");
-        fs::create_dir(&sparse)?;
-        let template = fs::read_to_string(root.join("packaging/AppxManifest.xml.in"))?;
-        let manifest = render_manifest(&template, identity, version, options.publisher());
-        fs::write(sparse.join("AppxManifest.xml"), manifest)?;
-        let package = payload.join("Unlinka.ShellIntegration.msix");
-        checked(
-            Command::new(sdk.join("makeappx.exe"))
-                .args(["pack", "/nv", "/o", "/d"])
-                .arg(&sparse)
-                .arg("/p")
-                .arg(&package),
-        )?;
-        sign(&signtool, options, &package)?;
-    }
     let files = inventory(&payload)?;
     fs::write(
         payload.join("payload.json"),
@@ -204,7 +176,7 @@ fn build_payload(context: &PackageBuild<'_>, binaries: &Path) -> io::Result<Path
             schema_version: 1,
             signed: options.signed(),
             package_version: (*version).to_owned(),
-            publisher: options.publisher().to_owned(),
+            signer_subject: options.publisher().to_owned(),
             protocol_version: 1,
             files,
         })?,
@@ -228,11 +200,7 @@ fn build_installer(context: &PackageBuild<'_>, payload: &Path, iscc: &Path) -> i
         script_dir.join("unlinka.iss"),
     )?;
     copy_assets(context.assets, &script_dir.join("Assets"))?;
-    generate_installer_messages(
-        root,
-        &script_dir.join("installer-messages.iss"),
-        options.signed(),
-    )?;
+    generate_installer_messages(root, &script_dir.join("installer-messages.iss"))?;
     let settings_key = "Software\\Unlinka\\Settings";
     let installation_key = "Software\\Unlinka\\Installation";
     let mut compile = Command::new(iscc);
@@ -370,11 +338,7 @@ fn checked(command: &mut Command) -> io::Result<()> {
 
 fn sdk_bin(supplied: Option<&Path>, signed: bool) -> io::Result<PathBuf> {
     let available = |directory: &Path| {
-        directory.join("rc.exe").is_file()
-            && (!signed
-                || ["makeappx.exe", "signtool.exe"]
-                    .iter()
-                    .all(|name| directory.join(name).is_file()))
+        directory.join("rc.exe").is_file() && (!signed || directory.join("signtool.exe").is_file())
     };
     if let Some(path) = supplied {
         let path = path.canonicalize()?;
@@ -525,30 +489,6 @@ END
     Ok(result)
 }
 
-fn xml(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('\'', "&apos;")
-}
-
-fn render_manifest(template: &str, identity: &Identity, version: &str, publisher: &str) -> String {
-    let mut rendered = template.to_owned();
-    for (key, value) in [
-        ("PACKAGE_NAME", identity.package_name.as_str()),
-        ("PUBLISHER", publisher),
-        ("VERSION", version),
-        ("INSTALL_NAME", &identity.install_name),
-        ("APPLICATION_ID", &identity.application_id),
-        ("MODERN_CLSID", &identity.modern_clsid),
-    ] {
-        rendered = rendered.replace(&format!("@{key}@"), &xml(value));
-    }
-    rendered
-}
-
 fn copy_assets(source: &Path, destination: &Path) -> io::Result<()> {
     fs::create_dir(destination)?;
     for entry in fs::read_dir(source)? {
@@ -596,12 +536,12 @@ fn inventory(root: &Path) -> io::Result<Vec<PayloadFile>> {
     Ok(files)
 }
 
-fn generate_installer_messages(root: &Path, output: &Path, signed: bool) -> io::Result<()> {
+fn generate_installer_messages(root: &Path, output: &Path) -> io::Result<()> {
     let mut messages = String::from("[CustomMessages]\n");
     for (language, locale) in [("en", "en-US"), ("zh", "zh-CN")] {
         let source = fs::read_to_string(root.join(format!("modules/i18n/locales/{locale}.ftl")))?;
         for (key, id) in [
-            ("Menus", if signed { "menus" } else { "menus-classic" }),
+            ("Menus", "menus"),
             ("UserPath", "user-path"),
             ("LanguageTitle", "language-title"),
             ("LanguagePrompt", "language-prompt"),

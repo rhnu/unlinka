@@ -1,4 +1,4 @@
-; The maintenance helper is the sole owner of payloads, COM, MSIX and PATH.
+; The maintenance helper is the sole owner of payloads, COM and PATH.
 ; Inno owns its uninstall log, ARP entry and shortcut only.
 #ifndef PayloadDir
   #error PayloadDir must name the verified staged payload

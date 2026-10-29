@@ -3,23 +3,17 @@ use super::{Payload, PayloadFile, relative, validate_version};
 mod recovery;
 
 fn test_payload(signed: bool) -> Payload {
-    let mut files: Vec<_> = ["unlinka.exe", "unlinka-desktop.exe", "unlinka-shell.dll"]
+    let files: Vec<_> = ["unlinka.exe", "unlinka-desktop.exe", "unlinka-shell.dll"]
         .into_iter()
         .map(|path| PayloadFile {
             path: path.into(),
             sha256: "0".repeat(64),
         })
         .collect();
-    if signed {
-        files.push(PayloadFile {
-            path: "Unlinka.ShellIntegration.msix".into(),
-            sha256: "0".repeat(64),
-        });
-    }
     Payload {
         schema_version: 1,
         package_version: "1.1.0.0".into(),
-        publisher: if signed {
+        signer_subject: if signed {
             "CN=Test".into()
         } else {
             String::new()
@@ -31,7 +25,7 @@ fn test_payload(signed: bool) -> Payload {
 }
 
 #[test]
-fn payload_modes_require_their_own_package_and_publisher_policy() {
+fn payload_signing_modes_require_matching_build_and_subject() {
     use super::payload::{validate_build_policy, validate_payload_metadata};
     let unsigned = test_payload(false);
     assert!(validate_payload_metadata(&unsigned).is_ok());
@@ -43,17 +37,10 @@ fn payload_modes_require_their_own_package_and_publisher_policy() {
     assert!(validate_build_policy(&signed, false, None).is_err());
     assert!(validate_build_policy(&signed, true, Some("CN=Other")).is_err());
     assert!(validate_build_policy(&signed, true, None).is_err());
-    signed.files.pop();
-    assert!(validate_payload_metadata(&signed).is_err());
-    signed.signed = false;
-    signed.publisher.clear();
-    signed.files.push(PayloadFile {
-        path: "extra.msix".into(),
-        sha256: "0".repeat(64),
-    });
+    signed.signer_subject.clear();
     assert!(validate_payload_metadata(&signed).is_err());
     let mut unsigned = unsigned;
-    unsigned.publisher = "CN=Dev".into();
+    unsigned.signer_subject = "CN=Dev".into();
     assert!(validate_payload_metadata(&unsigned).is_err());
 }
 
@@ -68,7 +55,7 @@ fn legacy_metadata_keeps_signature_verification_required() {
 }
 
 #[test]
-fn upgrades_adopt_signed_publisher_and_reverse_mode_only_at_newer_version() {
+fn upgrades_adopt_signed_subject_and_reverse_mode_only_at_newer_version() {
     use super::{Ownership, validate_upgrade_policy};
     let mut before = Ownership {
         schema_version: 1,
@@ -78,49 +65,14 @@ fn upgrades_adopt_signed_publisher_and_reverse_mode_only_at_newer_version() {
     assert!(validate_upgrade_policy(&before, &signed, "1.0.0.0").is_ok());
     assert!(validate_upgrade_policy(&before, &signed, "1.1.0.0").is_err());
     before.signed = true;
-    before.publisher = "CN=Test".into();
+    before.signer_subject = "CN=Test".into();
     assert!(validate_upgrade_policy(&before, &signed, "1.1.0.0").is_ok());
-    before.publisher = "CN=Other".into();
+    before.signer_subject = "CN=Other".into();
     assert!(validate_upgrade_policy(&before, &signed, "1.0.0.0").is_err());
     let unsigned = test_payload(false);
     assert!(validate_upgrade_policy(&before, &unsigned, "1.0.0.0").is_ok());
     assert!(validate_upgrade_policy(&before, &unsigned, "1.1.0.0").is_err());
     assert!(validate_upgrade_policy(&before, &unsigned, "1.2.0.0").is_err());
-}
-
-#[test]
-fn package_rollback_uses_the_policy_that_could_have_registered_the_package() {
-    use super::{Ownership, Transaction, journal::rollback_package_publisher};
-    let unsigned = Ownership {
-        schema_version: 1,
-        ..Ownership::default()
-    };
-    let signed = Ownership {
-        signed: true,
-        publisher: "CN=Original".into(),
-        ..unsigned.clone()
-    };
-    let mut tx = Transaction {
-        schema_version: 1,
-        id: String::new(),
-        removing: false,
-        preferences: super::PreferencesDisposition::Retain,
-        committed: false,
-        before_install: None,
-        before: signed.clone(),
-        after: unsigned.clone(),
-        registry: vec![],
-        files: vec![],
-        path: vec![],
-        package_touched: true,
-        artifacts: vec![],
-    };
-    assert_eq!(rollback_package_publisher(&tx).unwrap(), "CN=Original");
-    tx.before = unsigned;
-    tx.after = signed;
-    assert_eq!(rollback_package_publisher(&tx).unwrap(), "CN=Original");
-    tx.after.signed = false;
-    assert!(rollback_package_publisher(&tx).is_err());
 }
 
 #[test]
@@ -149,7 +101,7 @@ fn installed_helper_accepts_current_and_journal_owned_recovery_hashes() {
         registry: vec![],
         files: vec![],
         path: vec![],
-        package_touched: false,
+        _legacy_package_touched: (),
         artifacts: vec![],
     };
     tx.after.files.insert(helper.into(), new.clone());
@@ -190,7 +142,7 @@ fn installed_helper_rejects_invalid_or_foreign_transaction_metadata() {
         registry: vec![],
         files: vec![],
         path: vec![],
-        package_touched: false,
+        _legacy_package_touched: (),
         artifacts: vec![],
     };
     tx.after.files.insert(helper.into(), actual.clone());
@@ -212,7 +164,7 @@ fn installed_helper_rejects_invalid_or_foreign_transaction_metadata() {
     tx.files[0].backup = Some("state/backups/foreign/helper.exe".into());
     assert!(installed_helper_hash_owned(&owned, Some(&tx), &actual).is_err());
     tx.files[0].backup = None;
-    tx.after.publisher = "CN=Foreign".into();
+    tx.after.signer_subject = "CN=Foreign".into();
     assert!(installed_helper_hash_owned(&owned, Some(&tx), &actual).is_err());
 }
 

@@ -181,8 +181,39 @@ impl Drop for TrustState {
     }
 }
 
+/// Require the supported native x64 Windows 10 or newer installation platform.
+pub(crate) fn validate_platform() -> io::Result<()> {
+    use windows::{
+        Wdk::System::SystemServices::RtlGetVersion,
+        Win32::System::SystemInformation::{
+            GetNativeSystemInfo, OSVERSIONINFOW, PROCESSOR_ARCHITECTURE_AMD64, SYSTEM_INFO,
+        },
+    };
+    let mut info = SYSTEM_INFO::default();
+    let mut version = OSVERSIONINFOW {
+        dwOSVersionInfoSize: u32::try_from(std::mem::size_of::<OSVERSIONINFOW>())
+            .map_err(|error| invalid(format!("version structure is oversized: {error}")))?,
+        ..Default::default()
+    };
+    // SAFETY: the initialized native system information structure is writable.
+    unsafe { GetNativeSystemInfo(&raw mut info) };
+    // SAFETY: GetNativeSystemInfo populated the union's processor architecture member.
+    let architecture = unsafe { info.Anonymous.Anonymous.wProcessorArchitecture };
+    if architecture != PROCESSOR_ARCHITECTURE_AMD64 {
+        return Err(invalid("native x64 Windows is required"));
+    }
+    // SAFETY: the version output is initialized and advertises its exact checked size.
+    unsafe { RtlGetVersion(&raw mut version) }
+        .ok()
+        .map_err(win_error)?;
+    if version.dwMajorVersion < 10 {
+        return Err(invalid("Windows 10 or newer is required"));
+    }
+    Ok(())
+}
+
 /// Verifies the certificate chain without UI, retaining the same no-reparse file handle.
-pub(crate) fn signed_publisher(path: &Path) -> io::Result<String> {
+pub(crate) fn signed_subject(path: &Path) -> io::Result<String> {
     check_no_reparse(path)?;
     let file = OpenOptions::new()
         .read(true)
