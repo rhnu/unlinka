@@ -1,0 +1,49 @@
+name: Checks
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/cargo
+
+jobs:
+  rust:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt, clippy
+          cache-key: checks
+      - uses: RhNu/Rusteward@main
+      - name: Check compilation
+        run: cargo check --workspace --all-targets --locked
+      - name: Check formatting
+        run: cargo dev format --check --diff --locked
+      - name: Lint Rust
+        run: cargo dev lint --locked
+      - name: Run unit tests
+        run: cargo test --workspace --lib --bins --locked
+      - name: Check SVG-derived icon resources
+        run: cargo xtask assets --check
+      - name: Run deletion acceptance tests
+        run: cargo test -p unlinka --test acceptance --release --locked -- --ignored --test-threads=1 --nocapture
+      - name: Run console cancellation tests
+        run: cargo test -p unlinka --test cancellation --release --locked -- --ignored
+
+  markdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rvben/rumdl@v0
+        with:
+          version: "0.2.79"
+          command: check
+          report-type: annotations
+          args: --deny-config-warnings

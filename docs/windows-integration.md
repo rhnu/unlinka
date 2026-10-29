@@ -262,6 +262,16 @@ payload schema 1 使用 `signed` 和 `signer_subject` 描述签名策略。现�
 
 安装包版本为 Cargo 的 `major.minor.patch` 加 `--build-number` 的第四段，每段受 `u16` 限制；现有输出不可覆盖。两种签名状态的包路径均为 `target/packages/<version>`，Setup 均名为 `Unlinka-Setup-<version>-x64.exe`。切换签名状态也必须使用新的构建号。输出包含 Setup、工具 EXE、完整 payload、生成资源和 Inno 脚本。
 
+### 6.2 GitHub Actions 发行
+
+[Release 工作流](../.github/workflows/release.yml) 接收 `v<major.minor.patch>` 和 `v<major.minor.patch>.<build-number>` 标签。前三段必须与仓库 Cargo 版本完全一致，各段为不含多余前导零的十进制数，范围为 `0`–`65535`；省略第四段时使用 `0`。例如 Cargo 版本为 `0.1.1` 时，`v0.1.1` 生成 `0.1.1.0`，`v0.1.1.5` 生成 `0.1.1.5`。不匹配的标签在检查和打包前失败。
+
+标签通过验证后，并行调用[共用检查](../.github/workflows/checks.yml)和[安装包构建](../.github/workflows/package.yml)。两者全部成功后，通过 GitHub CLI 为已有标签创建公开 Release，自动生成发行说明，并附上 `Unlinka-Setup-<version>-x64.exe` 和同名 `.exe.sha256` 文件。所有自动构建均省略签名参数。只有发布任务拥有 `contents: write` 权限，无需额外配置访问令牌或签名证书。
+
+手动运行 Release 工作流时选择分支并填写 `build-number`，默认 `0`；该入口仅构建安装包并上传 Actions 产物，不运行共用检查、不创建标签或 Release。安装包和校验文件的 Actions 产物保留 14 天。已发布的 Release 不自动覆盖；发布成功后重新运行整个工作流会在创建同名 Release 时失败。
+
+检查与打包共用 Rust 安装和缓存配置，分别保存 Cargo 依赖构建结果；打包另外缓存专用静态 CRT 构建目录和经过校验的 Inno 工具。默认分支成功运行后保存 Rust 缓存，标签和拉取请求可复用。版本输出目录不缓存。常规 CI 只响应分支推送，避免标签推送重复执行同一套检查。
+
 ## 7. 待完成的发行与验收
 
 | 范围         | 验收内容                                                                                           |

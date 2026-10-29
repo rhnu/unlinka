@@ -12,6 +12,8 @@ x64 当前用户安装器面向 Windows 10/11，无需管理员权限。默认�
 
 安装、升级、修复与卸载代码已实现。未签名构建可以安装，签名构建额外校验 Authenticode 签名；签名与未签名构建使用同一产品标识和安装位置。证书签名构建及真实 Windows 生命周期/菜单验收仍待完成，签名选项与待验收范围见 [Windows 集成说明](docs/windows-integration.md)。
 
+未签名 x64 安装包通过 [GitHub Releases](https://github.com/RhNu/unlinka/releases) 分发。推送 `v<major.minor.patch>` 或 `v<major.minor.patch>.<build-number>` 标签后，共用检查通过即可自动发布安装包及 SHA-256 校验文件。前三段必须与 Cargo 版本一致，省略构建号时使用 `0`。[Release 工作流](https://github.com/RhNu/unlinka/actions/workflows/release.yml) 也支持手动构建，仅上传 Actions 产物。
+
 准备 Rust 1.99 MSVC 和 Windows SDK x64 构建工具。首次打包自动下载并校验 Inno 编译器，之后校验并复用本地缓存，无需单独安装 Inno 或指定编译器路径：
 
 ```powershell

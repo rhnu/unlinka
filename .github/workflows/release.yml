@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      build-number:
+        description: Fourth Windows version component (0-65535); builds an artifact without publishing.
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      package-version: ${{ steps.version.outputs.package-version }}
+      build-number: ${{ steps.version.outputs.build-number }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate release version
+        id: version
+        shell: python
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          BUILD_NUMBER: ${{ inputs.build-number }}
+        run: |
+          import os
+          import re
+          import tomllib
+
+          with open("Cargo.toml", "rb") as manifest:
+              version = tomllib.load(manifest)["workspace"]["package"]["version"]
+          number = r"(0|[1-9][0-9]*)"
+          stable = rf"{number}\.{number}\.{number}"
+          if not re.fullmatch(stable, version):
+              raise SystemExit("Cargo version must be stable major.minor.patch")
+          if os.environ["EVENT_NAME"] == "push":
+              tag = os.environ["RELEASE_TAG"]
+              match = re.fullmatch(rf"v{stable}(?:\.{number})?", tag)
+              if not match or ".".join(match.groups()[:3]) != version:
+                  raise SystemExit(f"Tag must be v{version} or v{version}.<build-number>")
+              build = match[4] or "0"
+          else:
+              build = os.environ["BUILD_NUMBER"]
+              if not re.fullmatch(number, build):
+                  raise SystemExit("Build number must be a nonnegative integer without leading zeros")
+          package_version = f"{version}.{build}"
+          if any(int(part) > 65535 for part in package_version.split(".")):
+              raise SystemExit("Each Windows version component must be between 0 and 65535")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"package-version={package_version}\nbuild-number={build}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"Unsigned Windows x64 package: `{package_version}`.\n")
+
+  checks:
+    needs: version
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/checks.yml
+
+  package:
+    needs: version
+    uses: ./.github/workflows/package.yml
+    with:
+      package-version: ${{ needs.version.outputs.package-version }}
+      build-number: ${{ needs.version.outputs.build-number }}
+
+  publish:
+    needs: [version, checks, package]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download installer and checksum
+        uses: actions/download-artifact@v8
+        with:
+          name: Unlinka-Setup-${{ needs.version.outputs.package-version }}-x64
+          path: release
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/* --verify-tag --title "Unlinka $RELEASE_TAG" --generate-notes

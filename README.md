@@ -12,6 +12,8 @@ The x64 current-user installer targets Windows 10/11 without administrator privi
 
 Installer, repair, upgrade, and uninstall code is implemented. Unsigned builds are installable; signed builds additionally validate Authenticode signatures. Signed and unsigned builds share the same product identity and installation. Certificate-backed signing and real Windows lifecycle/menu acceptance remain pending. See [integration and packaging](docs/windows-integration.md) for signing options and remaining validation.
 
+Download unsigned x64 installers from [GitHub Releases](https://github.com/RhNu/unlinka/releases). Pushing `v<major.minor.patch>` or `v<major.minor.patch>.<build-number>` runs the shared checks and publishes an installer plus its SHA-256 checksum. The first three components must match the Cargo version; an omitted build number is `0`. The [Release workflow](https://github.com/RhNu/unlinka/actions/workflows/release.yml) also supports manual builds that upload an Actions artifact without publishing a release.
+
 Build the default installer with Rust 1.99 MSVC and Windows SDK x64 build tools. The first build downloads and verifies the Inno compiler; later builds verify and reuse its local cache. No separate Inno installation or compiler path is needed:
 
 ```powershell

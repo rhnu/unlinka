@@ -1,0 +1,58 @@
+name: Package
+
+on:
+  workflow_call:
+    inputs:
+      package-version:
+        required: true
+        type: string
+      build-number:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/cargo
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: package
+          workspaces: |
+            . -> target/cargo
+            . -> target/installer-build/unsigned
+      - name: Cache verified Inno compiler
+        uses: actions/cache@v6
+        with:
+          path: target/tools
+          key: inno-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/xtask/src/packaging/compiler.rs') }}
+      - name: Build unsigned installer
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.package-version }}
+          BUILD_NUMBER: ${{ inputs.build-number }}
+        run: |
+          cargo xtask pack --build-number $env:BUILD_NUMBER
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+          $setup = "target/packages/$env:PACKAGE_VERSION/Unlinka-Setup-$env:PACKAGE_VERSION-x64.exe"
+          $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $setup)" | Set-Content -LiteralPath "$setup.sha256" -Encoding ascii
+          "Built unsigned installer: ``$(Split-Path -Leaf $setup)`` (SHA-256: ``$hash``)." >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload installer and checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: Unlinka-Setup-${{ inputs.package-version }}-x64
+          path: |
+            target/packages/${{ inputs.package-version }}/Unlinka-Setup-${{ inputs.package-version }}-x64.exe
+            target/packages/${{ inputs.package-version }}/Unlinka-Setup-${{ inputs.package-version }}-x64.exe.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

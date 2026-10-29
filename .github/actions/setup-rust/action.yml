@@ -1,0 +1,26 @@
+name: Set up Rust and dependency cache
+description: Install the workspace toolchain and restore dependencies for a build role.
+
+inputs:
+  components:
+    description: Additional Rust components to install.
+    default: ""
+  cache-key:
+    description: Build role used to separate incompatible dependency artifacts.
+    required: true
+  workspaces:
+    description: Workspace and target directory mappings for the Rust cache.
+    default: . -> target/cargo
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@1.99.0
+      with:
+        components: ${{ inputs.components }}
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: windows-msvc-${{ inputs.cache-key }}
+        workspaces: ${{ inputs.workspaces }}
+        cache-bin: "false"
+        save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
